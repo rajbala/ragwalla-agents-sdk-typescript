@@ -483,29 +483,29 @@ ws.cancelRun('run_abc123');
 ```typescript
 const results = await ragwalla.vectorStores.search('vector_store_id', {
   query: 'How to use the API?',
-  top_k: 5,
-  include_metadata: true
+  max_num_results: 5
 });
 
 results.data.forEach(result => {
   console.log(`Score: ${result.score}`);
-  console.log(`Content: ${result.content}`);
+  console.log(`File: ${result.filename}`);
+  console.log(`Content: ${result.content.map(item => item.text).join('\n')}`);
 });
 ```
 
 ### Advanced Search with Filters
 
 ```typescript
-const results = await ragwalla.vectorStores.searchExtended('vector_store_id', {
+const results = await ragwalla.vectorStores.search('vector_store_id', {
   query: 'JavaScript examples',
-  top_k: 3,
-  filter: {
+  max_num_results: 3,
+  filters: {
     language: 'javascript',
     category: 'tutorial'
   },
-  extended_query: 'Find JavaScript SDK usage examples',
-  search_type: 'similarity_score_threshold',
-  search_kwargs: {
+  rewrite_query: true,
+  ranking_options: {
+    ranker: 'hybrid',
     score_threshold: 0.8
   }
 });

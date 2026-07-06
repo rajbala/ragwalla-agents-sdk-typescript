@@ -2,6 +2,7 @@ import { HTTPClient } from '../client/http-client.js';
 import {
   VectorSearchRequest,
   VectorSearchResponse,
+  VectorSearchOptions,
   VectorStoreFile,
   VectorStoreFileListResponse,
   VectorStoreFileDeleted,
@@ -12,28 +13,32 @@ import {
 export class VectorStoresResource {
   constructor(private client: HTTPClient) {}
 
+  private searchPath(vectorStoreId: string, options?: VectorSearchOptions): string {
+    const pageToken = options?.page_token;
+    const query = pageToken ? `?page_token=${encodeURIComponent(pageToken)}` : '';
+    return `/v1/vector_stores/${vectorStoreId}/search${query}`;
+  }
+
   /**
    * Search a vector store
    */
   async search(
     vectorStoreId: string,
-    request: VectorSearchRequest
+    request: VectorSearchRequest,
+    options?: VectorSearchOptions
   ): Promise<VectorSearchResponse> {
-    return this.client.post<VectorSearchResponse>(`/v1/vector_stores/${vectorStoreId}/search`, request);
+    return this.client.post<VectorSearchResponse>(this.searchPath(vectorStoreId, options), request);
   }
 
   /**
-   * Search with extended query (for code search, etc.)
+   * @deprecated Use search(). This method is retained as a compatibility alias.
    */
   async searchExtended(
     vectorStoreId: string,
-    request: VectorSearchRequest & {
-      extended_query?: string;
-      search_type?: 'similarity' | 'mmr' | 'similarity_score_threshold';
-      search_kwargs?: Record<string, any>;
-    }
+    request: VectorSearchRequest,
+    options?: VectorSearchOptions
   ): Promise<VectorSearchResponse> {
-    return this.client.post<VectorSearchResponse>(`/v1/vector_stores/${vectorStoreId}/search`, request);
+    return this.search(vectorStoreId, request, options);
   }
 
   // ── File management ───────────────────────────────────────────────────

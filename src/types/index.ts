@@ -605,26 +605,65 @@ export interface ConnectionToken {
   expires_at: string;
 }
 
+export interface VectorSearchComparisonFilter {
+  $eq?: unknown;
+  $ne?: unknown;
+  $gt?: unknown;
+  $gte?: unknown;
+  $lt?: unknown;
+  $lte?: unknown;
+  $in?: unknown[];
+  $nin?: unknown[];
+}
+
+export interface VectorSearchCompoundFilter {
+  $and?: VectorSearchFilter[];
+  $or?: VectorSearchFilter[];
+  $not?: VectorSearchFilter;
+}
+
+export type VectorSearchFilter =
+  | VectorSearchComparisonFilter
+  | VectorSearchCompoundFilter
+  | Record<string, unknown>;
+
+export interface VectorSearchRankingOptions {
+  ranker?: 'bm25' | 'cosine' | 'hybrid';
+  score_threshold?: number;
+  boost_factor?: number;
+}
+
 export interface VectorSearchRequest {
-  query: string;
-  top_k?: number;
-  filter?: Record<string, any>;
-  include_metadata?: boolean;
+  query: string | string[];
+  rewrite_query?: boolean;
+  max_num_results?: number;
+  filters?: VectorSearchFilter;
+  ranking_options?: VectorSearchRankingOptions;
+}
+
+export interface VectorSearchOptions {
+  page_token?: string;
+}
+
+export interface VectorSearchResultContent {
+  type: 'text';
+  text: string;
 }
 
 export interface VectorSearchResult {
-  id: string;
+  file_id: string;
+  filename: string;
   score: number;
-  metadata?: Record<string, any>;
-  content?: string;
+  attributes: Record<string, unknown>;
+  content: VectorSearchResultContent[];
 }
 
 export interface VectorSearchResponse {
-  object: 'list';
+  object: 'vector_store.search_results.page';
+  search_query: string[];
   data: VectorSearchResult[];
-  usage?: {
-    total_tokens: number;
-  };
+  has_more: boolean;
+  next_page: string | null;
 }
 
 // File types

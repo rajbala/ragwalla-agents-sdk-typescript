@@ -35,7 +35,7 @@ export default {
       // Example 3: Vector search (HTTP endpoint works fine for search)
       const searchResults = await ragwalla.vectorStores.search('your-vector-store-id', {
         query: 'product documentation',
-        top_k: 5
+        max_num_results: 5
       });
 
       // Construct WebSocket URL for the client to connect to
