@@ -362,7 +362,7 @@ The WebSocket client emits the following events:
 #### Other Events
 - `rawFrame` / `frame` - Every inbound Ragwalla frame before SDK normalization. Durable Object proxies can relay this object directly to browsers to preserve upstream frame shapes, including future frame types.
 - `status` - Transient status/progress updates (e.g., tool execution progress)
-- `threadHistory` - Thread message history (`{ threadId, messages, messageCount }`)
+- `threadHistory` - Thread message history (`{ threadId, messages, messageCount, latestRun }`). `threadId` is always populated by the server, so this frame identifies its own thread. `latestRun` is `{id, status, lastError}` or `null` — the thread's newest run, for telling a live-but-silent run from a dead one; `null` on servers predating it. Note `messages[].createdAt` is unix **seconds**, unlike `thread_info.createdAt` which is ISO-8601.
 - `tokenUsage` - Token usage statistics
 - `error` - Error occurred
 - `rawMessage` - Unhandled message types (for debugging)

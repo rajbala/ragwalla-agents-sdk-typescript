@@ -796,6 +796,48 @@ export interface WebSocketMessage {
   activeRunStatus?: RunStatus; // Sent in 'connected' message; reconnect can report any status (incl. terminal)
   runStatus?: RunStatus; // Sent in 'run_state' - current status of the run on this connection
   activeTool?: { toolName: string; toolTitle?: string; progress?: number } | null; // 'run_state' - best-effort; null in v1
+  // Error frames. The worker sends these at the TOP LEVEL, never under `data`: `error` is a
+  // string on every path but the generic onMessage catch, which sends { message, code }.
+  error?: string | { message: string; code?: string };
+  code?: string; // Only on auth/lifecycle refusals (AUTH_REQUIRED, ENDPOINT_DELETING, ...). Thread-path errors carry NO code.
+  // thread_history payload
+  messages?: ThreadHistoryMessage[];
+  messageCount?: number;
+  latestRun?: ThreadLatestRun | null; // Absent on servers older than 2026-07-15
+}
+
+/**
+ * The thread's newest run, stamped onto `thread_history` so a client can distinguish a run that
+ * is still working (keep waiting) from one that died (surface the error) — history alone cannot
+ * tell you, because it deliberately excludes the in-flight assistant message.
+ */
+export interface ThreadLatestRun {
+  id: string;
+  status: RunStatus;
+  /** Structured `{ code, message }` when the run stored JSON, otherwise the raw string. */
+  lastError: unknown;
+}
+
+/**
+ * One durable message in a `thread_history` frame. History contains only COMPLETED turns —
+ * the in-flight assistant message is deliberately excluded and arrives via `resume` instead.
+ */
+export interface ThreadHistoryMessage {
+  id: string;
+  role: string;
+  /** Flattened plain text; multi-part content is joined, images are replaced by a placeholder. */
+  content: string;
+  /**
+   * Unix SECONDS — NOT milliseconds, and not the same encoding as `thread_info.createdAt`,
+   * which is an ISO-8601 string derived from this very column. Multiply by 1000 for a Date.
+   */
+  createdAt: number;
+  status?: string;
+  completedAt?: number;
+  metadata?: Record<string, unknown>;
+  /** Remote URLs only — base64 `data:` images are stripped server-side to stay under the frame size limit. */
+  images?: Array<{ url: string; detail?: string }>;
+  toolCalls?: unknown[];
 }
 
 export interface RagwallaError {
