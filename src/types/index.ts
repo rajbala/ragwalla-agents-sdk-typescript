@@ -803,7 +803,12 @@ export interface WebSocketMessage {
   // thread_history payload
   messages?: ThreadHistoryMessage[];
   messageCount?: number;
-  latestRun?: ThreadLatestRun | null; // Absent on servers older than 2026-07-15
+  /**
+   * Three distinct states: the key is ABSENT on servers predating the field (run state unknown),
+   * `null` when the server looked and the thread has no runs, or the newest run. Do not collapse
+   * absent into null — a staleness watchdog must not read an old server's silence as "no runs".
+   */
+  latestRun?: ThreadLatestRun | null;
 }
 
 /**

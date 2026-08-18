@@ -171,7 +171,7 @@ All frames are JSON with a `type` field.
 |---|---|---|
 | `connected` | `agentId, authenticated, currentThreadId?, activeRunId?, activeRunStatus?` | on open |
 | `thread_info` | `threadId, createdAt` | after open, when on a thread |
-| `thread_history` | `threadId, messages[], messageCount, latestRun` | right after `thread_info`, and on connect when the dial URL carried a valid `thread_id` |
+| `thread_history` | `threadId, messages[], messageCount, latestRun?` | right after `thread_info`, and on connect when the dial URL carried a valid `thread_id`. `latestRun` is omitted entirely by servers predating it — absent means unknown, `null` means no runs |
 | `run_state` | `runId, runStatus, activeTool` | on reconnect, when a run is/was active |
 | `message_created` | `messageId, role?` | a new assistant message begins |
 | `chunk` | `messageId, content` | a streamed text delta |

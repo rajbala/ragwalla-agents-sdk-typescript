@@ -928,13 +928,20 @@ export class RagwallaWebSocket {
         // worker (single emitter, non-optional parameter), so this frame is self-identifying
         // and needs no ordering-based correlation.
         // `latestRun` is the thread's authoritative run status, stamped so a client can tell a
-        // live-but-silent run from a dead one instead of inferring failure from silence. It is
-        // absent on servers older than 2026-07-15 — forward it as-is rather than defaulting.
+        // live-but-silent run from a dead one instead of inferring failure from silence.
+        // It has THREE states and they are not interchangeable:
+        //   key absent -> the server predates the field; run state is UNKNOWN
+        //   null       -> the server looked and the thread has no runs
+        //   object     -> the thread's newest run
+        // So the key is omitted rather than defaulted: `?? null` would report an old server's
+        // silence as a confirmed "no runs", which is the opposite of what a staleness watchdog
+        // should conclude. Same absence-is-meaningful convention the worker uses for
+        // `connected.currentThreadId`.
         this.emit('threadHistory', {
           threadId: message.threadId,
           messages: message.messages || [],
           messageCount: message.messageCount || 0,
-          latestRun: message.latestRun ?? null
+          ...('latestRun' in message ? { latestRun: message.latestRun } : {})
         });
         break;
       case 'typing':
