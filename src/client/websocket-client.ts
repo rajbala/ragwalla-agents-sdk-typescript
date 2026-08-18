@@ -924,11 +924,24 @@ export class RagwallaWebSocket {
         break;
       }
       case 'thread_history':
-        // Historical messages for the current thread
+        // Historical messages for the current thread. `threadId` is always populated by the
+        // worker (single emitter, non-optional parameter), so this frame is self-identifying
+        // and needs no ordering-based correlation.
+        // `latestRun` is the thread's authoritative run status, stamped so a client can tell a
+        // live-but-silent run from a dead one instead of inferring failure from silence.
+        // It has THREE states and they are not interchangeable:
+        //   key absent -> the server predates the field; run state is UNKNOWN
+        //   null       -> the server looked and the thread has no runs
+        //   object     -> the thread's newest run
+        // So the key is omitted rather than defaulted: `?? null` would report an old server's
+        // silence as a confirmed "no runs", which is the opposite of what a staleness watchdog
+        // should conclude. Same absence-is-meaningful convention the worker uses for
+        // `connected.currentThreadId`.
         this.emit('threadHistory', {
-          threadId: (message as any).threadId,
-          messages: (message as any).messages || [],
-          messageCount: (message as any).messageCount || 0
+          threadId: message.threadId,
+          messages: message.messages || [],
+          messageCount: message.messageCount || 0,
+          ...('latestRun' in message ? { latestRun: message.latestRun } : {})
         });
         break;
       case 'typing':
@@ -1022,9 +1035,25 @@ export class RagwallaWebSocket {
         });
         break;
       }
-      case 'error':
-        this.emit('error', message.data || { error: message.content });
+      case 'error': {
+        // The worker puts the whole payload at the TOP LEVEL of an error frame — there is
+        // no `data` wrapper and no `content` field, so the previous `message.data ||
+        // { error: message.content }` always fell through to the second branch and emitted
+        // `{ error: undefined }`, dropping every error message on the floor.
+        // `error` is a string on all but one path; the generic onMessage catch sends
+        // `{ message, code }` instead. `code` is present only on auth/lifecycle refusals —
+        // thread-path errors carry none. threadId/messageId appear on the pipeline-timeout
+        // frame and are the only correlation the error surface offers.
+        const raw = (message as any).error;
+        const nested = raw !== null && typeof raw === 'object' ? raw : undefined;
+        this.emit('error', {
+          error: nested ? nested.message : raw,
+          code: nested ? nested.code : (message as any).code,
+          threadId: (message as any).threadId,
+          messageId: (message as any).messageId
+        });
         break;
+      }
       case 'connection_status':
       case 'connected': {
         const connMsg = message.data || message;
