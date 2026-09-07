@@ -346,6 +346,10 @@ ws.on('requestAck', ({ requestId, requestType }) => {
 ws.on('error', ({ requestId, error }) => {
   console.error('Request failed:', requestId, error);
 });
+ws.on('runStarted', ({ requestId, threadId, userMessageId, runId }) => {
+  // Save this pairing. Later chunks/completion use runId, not requestId.
+  console.log('Run created:', requestId, threadId, userMessageId, runId);
+});
 ws.on('rawFrame', (frame) => {
   if (frame.type === 'message_received' && frame.requestId === 'chat-1') {
     console.log('Chat stored:', frame.messageId);
@@ -368,6 +372,19 @@ The three truncation/KB/semantic setters reply with `requestAck`;
 continuation-mode changes use the existing `continuationModeUpdated` event.
 Setters with an ID require an open connection and throw before changing local settings
 when disconnected. Calls without an ID retain their existing behavior.
+
+For chat, `message_received` confirms the user message was stored. `runStarted`
+(the native `run_started` frame) then supplies its `userMessageId` and the persisted
+`runId` before execution. It also works without a `requestId`. This acknowledges run
+creation, not completion or successful model execution.
+
+On reconnect, `runState.userMessageId` and `threadHistory.latestRun.userMessageId`
+identify the initiating prompt for the recovered run. These optional fields require
+a server with prompt/run correlation support and are absent for older runs or other
+run creation paths. History messages also expose `runId`; for pending user inputs
+that is processing ownership and can be cleared on failure or reassigned on retry.
+Use the run's `userMessageId` for immutable origin, and `runId` to match subsequent
+run events. Request IDs remain socket-local correlation, not durable identifiers.
 
 A request can produce multiple replies. Shared run events continue to use their
 run/message identifiers, and unsolicited events need not have a request ID.
@@ -408,6 +425,7 @@ The WebSocket client emits the following events:
 - `continueRunResult` - Response to a `continue_run` request (`{ status, runId, error? }`)
 
 #### Other Events
+- `runStarted` - Persisted prompt/run pairing (`{ threadId, userMessageId, runId, requestId? }`)
 - `requestAck` - Acknowledgment of a correlated setting update (`{ type, requestId, requestType }`)
 - `pong` - Keepalive reply with optional `requestId` and `timestamp`
 - `rawFrame` / `frame` - Every inbound Ragwalla frame before SDK normalization. Durable Object proxies can relay this object directly to browsers to preserve upstream frame shapes, including future frame types.

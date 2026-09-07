@@ -892,3 +892,38 @@ describe('native requestId correlation', () => {
     expect(JSON.parse(FakeWebSocket.last.sent[0])).not.toHaveProperty('maxKbCharsPerChunk');
   });
 });
+
+
+describe('prompt/run correlation', () => {
+  it('pairs overlapping requests when run_started arrives out of order', async () => {
+    const client = newClient();
+    await connectOpen(client, { threadId: 'thr_1' });
+    const started = jest.fn();
+    client.on('runStarted', started);
+    client.sendMessage({ role: 'user', content: 'first' }, { requestId: 'first' });
+    client.sendMessage({ role: 'user', content: 'second' }, { requestId: 'second' });
+    for (const id of ['second', 'first']) {
+      FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1',
+        userMessageId: `msg_${id}`, runId: `run_${id}`, requestId: id });
+    }
+    expect(started.mock.calls.map(([frame]) => frame)).toEqual([
+      { threadId: 'thr_1', userMessageId: 'msg_second', runId: 'run_second', requestId: 'second' },
+      { threadId: 'thr_1', userMessageId: 'msg_first', runId: 'run_first', requestId: 'first' }
+    ]);
+    client.disconnect();
+  });
+
+  it('emits runStarted without a requestId and preserves reconnect provenance', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const started = jest.fn();
+    const state = jest.fn();
+    client.on('runStarted', started);
+    client.on('runState', state);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_1', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', userMessageId: 'msg_1', runStatus: 'failed', activeTool: null });
+    expect(started).toHaveBeenCalledWith({ threadId: 'thr_1', userMessageId: 'msg_1', runId: 'run_1' });
+    expect(state).toHaveBeenCalledWith({ runId: 'run_1', userMessageId: 'msg_1', runStatus: 'failed', activeTool: null });
+    client.disconnect();
+  });
+});

@@ -797,7 +797,7 @@ export type KnownWebSocketMessageType =
   'thread_info' | 'thread_history' | 'typing' | 'tool_use' | 'token_usage' | 'error' |
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
-  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'request_ack' | 'pong';
+  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
@@ -814,6 +814,8 @@ export interface WebSocketMessage {
   // Additional fields the server may include
   threadId?: string;
   runId?: string;
+  /** The user message that initiated this run (run_started/run_state). */
+  userMessageId?: string;
   assistantId?: string;
   agentId?: string;
   projectId?: string;
@@ -861,17 +863,21 @@ export interface WebSocketMessage {
  */
 export interface ThreadLatestRun {
   id: string;
+  /** Immutable initiating prompt; absent for runs without native chat provenance. */
+  userMessageId?: string;
   status: RunStatus;
   /** Structured `{ code, message }` when the run stored JSON, otherwise the raw string. */
   lastError: unknown;
 }
 
 /**
- * One durable message in a `thread_history` frame. History contains only COMPLETED turns —
+ * One durable message in a `thread_history` frame. Pending user inputs are included;
  * the in-flight assistant message is deliberately excluded and arrives via `resume` instead.
  */
 export interface ThreadHistoryMessage {
   id: string;
+  /** Processing run ownership. Pending input ownership can be released after failure. */
+  runId?: string | null;
   role: string;
   /** Flattened plain text; multi-part content is joined, images are replaced by a placeholder. */
   content: string;
