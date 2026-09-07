@@ -1053,11 +1053,20 @@ export class RagwallaWebSocket {
         });
         break;
       }
+      case 'run_started': {
+        emit('runStarted', {
+          threadId: message.threadId,
+          userMessageId: message.userMessageId,
+          runId: message.runId
+        });
+        break;
+      }
       case 'run_state': {
         // Reconnect run status (§6a item 4): the run's current status on this connection.
         const stateData = (message.data || message) as {
           runId?: string;
           runStatus?: string;
+          userMessageId?: string;
           activeTool?: unknown;
         };
         // A terminal run has no in-flight message to resume; clear the id so a later
@@ -1069,6 +1078,7 @@ export class RagwallaWebSocket {
         emit('runState', {
           runId: stateData.runId,
           runStatus: stateData.runStatus,
+          ...(stateData.userMessageId !== undefined ? { userMessageId: stateData.userMessageId } : {}),
           activeTool: stateData.activeTool ?? null
         });
         break;
