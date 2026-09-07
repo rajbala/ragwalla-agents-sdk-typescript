@@ -790,3 +790,105 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(url.searchParams.get('resume_message_id')).toBe('msg_1');
   });
 });
+
+describe('native requestId correlation', () => {
+  it('sends caller IDs on chat and command helpers without generating IDs for legacy calls', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    client.sendMessage({ role: 'user', content: 'hello' }, { requestId: 'chat-1' });
+    await client.sendMessageAsync({ role: 'user', content: 'next' }, { requestId: 'chat-2' });
+    client.setContinuationMode('manual', { requestId: 'mode' });
+    client.setTruncationStrategy(undefined, { requestId: 'truncation' });
+    client.setMaxKbCharsPerChunk(500, { requestId: 'kb' });
+    client.setSemanticAugmentation(true, { requestId: 'semantic' });
+    client.continueRun('run-1', { requestId: 'continue' });
+    client.cancelRun(undefined, { requestId: 'cancel' });
+    client.send({ type: 'ping' });
+    client.sendMessage({ role: 'user', content: 'legacy' });
+
+    const frames = FakeWebSocket.last.sent.map(text => JSON.parse(text));
+    expect(frames.slice(0, 8).map(frame => frame.requestId)).toEqual([
+      'chat-1', 'chat-2', 'mode', 'truncation', 'kb', 'semantic', 'continue', 'cancel',
+    ]);
+    expect(frames[0]).toMatchObject({ type: 'message', content: 'hello' });
+    expect(frames[3]).toEqual({ type: 'set_truncation_strategy', truncationStrategy: null, requestId: 'truncation' });
+    expect(frames[6]).toEqual({ type: 'continue_run', runId: 'run-1', requestId: 'continue' });
+    expect(frames[7]).toEqual({ type: 'cancel_run', requestId: 'cancel' });
+    expect(FakeWebSocket.last.sent[8]).toBe('{"type":"ping"}');
+    expect(frames[9]).not.toHaveProperty('requestId');
+  });
+
+  it('preserves a chat ID while waiting for the connection to open', async () => {
+    const client = newClient();
+    const opening = client.connect('agent', 'conn', 'tok');
+    const sending = client.sendMessageAsync({ role: 'user', content: 'hello' }, { requestId: 'waiting' });
+    expect(FakeWebSocket.last.sent).toEqual([]);
+    FakeWebSocket.last.fire('open', {});
+    await Promise.all([opening, sending]);
+    expect(JSON.parse(FakeWebSocket.last.sent[0]).requestId).toBe('waiting');
+  });
+
+  it('retains IDs for raw send and sendAsync, including an empty string ID', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    client.send({ type: 'load_thread_history', threadId: 't1', requestId: '' });
+    await client.sendAsync({ type: 'create_new_thread', requestId: 'create' });
+    expect(FakeWebSocket.last.sent.map(text => JSON.parse(text))).toEqual([
+      { type: 'load_thread_history', threadId: 't1', requestId: '' },
+      { type: 'create_new_thread', requestId: 'create' },
+    ]);
+  });
+
+  it.each([
+    ['thread_history', 'threadHistory', { threadId: 't1', messages: [], messageCount: 0 }],
+    ['chunk', 'chunk', { messageId: 'm1', content: 'text' }],
+    ['typing', 'typing', { isTyping: false }],
+    ['error', 'error', { error: 'Unknown command', code: 'UNKNOWN_TYPE' }],
+    ['continuation_mode_updated', 'continuationModeUpdated', { data: { mode: 'manual' } }],
+  ])('retains requestId when normalizing %s', async (type, event, payload) => {
+    const client = newClient();
+    await connectOpen(client);
+    const listener = jest.fn();
+    const raw = jest.fn();
+    client.on(event as string, listener);
+    client.on('rawFrame', raw);
+    const frame = { type, ...payload as object, requestId: 'request-1' };
+    FakeWebSocket.last.frame(frame);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'request-1' }));
+    expect(raw).toHaveBeenCalledWith(frame);
+  });
+
+  it('keeps out-of-order replies independent and does not stamp unsolicited events', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const pongs = jest.fn();
+    const acks = jest.fn();
+    const errors = jest.fn();
+    const raw = jest.fn();
+    client.on('pong', pongs);
+    client.on('requestAck', acks);
+    client.on('error', errors);
+    client.on('rawMessage', raw);
+    FakeWebSocket.last.frame({ type: 'pong', requestId: '2' });
+    FakeWebSocket.last.frame({ type: 'error', requestId: '1', error: 'refused' });
+    FakeWebSocket.last.frame({ type: 'request_ack', requestId: '3', requestType: 'set_semantic_augmentation' });
+    FakeWebSocket.last.frame({ type: 'pong' });
+    expect(pongs.mock.calls.map(call => call[0])).toEqual([{ type: 'pong', requestId: '2' }, { type: 'pong' }]);
+    expect(errors).toHaveBeenCalledWith(expect.objectContaining({ requestId: '1' }));
+    expect(acks).toHaveBeenCalledWith({ type: 'request_ack', requestId: '3', requestType: 'set_semantic_augmentation' });
+    expect(raw).toHaveBeenCalledTimes(3); // Preserve the old rawMessage path for pong/ack.
+  });
+
+  it('rejects correlated offline setters before changing local settings', async () => {
+    const client = newClient();
+    expect(() => client.setContinuationMode('manual', { requestId: 'mode' })).toThrow('must be connected');
+    expect(() => client.setTruncationStrategy(undefined, { requestId: 'truncation' })).toThrow('must be connected');
+    expect(() => client.setMaxKbCharsPerChunk(500, { requestId: 'kb' })).toThrow('must be connected');
+    expect(() => client.setSemanticAugmentation(true, { requestId: 'semantic' })).toThrow('must be connected');
+    await connectOpen(client);
+    expect(new URL(FakeWebSocket.last.url).searchParams.get('continuation_mode')).toBe('auto');
+    client.sendMessage({ role: 'user', content: 'hello' });
+    expect(JSON.parse(FakeWebSocket.last.sent[0])).not.toHaveProperty('semanticAugmentation');
+    expect(JSON.parse(FakeWebSocket.last.sent[0])).not.toHaveProperty('maxKbCharsPerChunk');
+  });
+});

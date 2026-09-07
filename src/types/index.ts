@@ -797,12 +797,16 @@ export type KnownWebSocketMessageType =
   'thread_info' | 'thread_history' | 'typing' | 'tool_use' | 'token_usage' | 'error' |
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
-  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state';
+  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'request_ack' | 'pong';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
 export interface WebSocketMessage {
   type: WebSocketMessageType;
+  /** Client-supplied correlation ID echoed on direct native replies and errors. */
+  requestId?: string;
+  /** Original command type on a request_ack frame. */
+  requestType?: string;
   data?: any; // Optional - some message types don't use data wrapper
   content?: string; // For message types - content at top level
   role?: string; // For message types
@@ -838,7 +842,7 @@ export interface WebSocketMessage {
   // Error frames. The worker sends these at the TOP LEVEL, never under `data`: `error` is a
   // string on every path but the generic onMessage catch, which sends { message, code }.
   error?: string | { message: string; code?: string };
-  code?: string; // Only on auth/lifecycle refusals (AUTH_REQUIRED, ENDPOINT_DELETING, ...). Thread-path errors carry NO code.
+  code?: string; // Auth/lifecycle and protocol refusals (e.g. UNKNOWN_TYPE, INVALID_REQUEST_ID).
   // thread_history payload
   messages?: ThreadHistoryMessage[];
   messageCount?: number;
