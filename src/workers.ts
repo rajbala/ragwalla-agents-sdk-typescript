@@ -12,6 +12,7 @@ export * from './resources/endpoints.js';
 export * from './resources/namespace-flags.js';
 export { HTTPClient, RagwallaAPIError } from './client/http-client.js';
 export { RagwallaWebSocket } from './client/websocket-client.js';
+export type { WebSocketRequestOptions } from './client/websocket-client.js';
 
 import { RagwallaConfig } from './types/index.js';
 import { HTTPClient } from './client/http-client.js';

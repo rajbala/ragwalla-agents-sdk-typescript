@@ -331,6 +331,54 @@ ws.sendMessage({
 });
 ```
 
+### Optional request correlation
+
+Supply a string `requestId` to correlate native commands with their direct replies
+and errors. Choose an ID unique among outstanding requests on that socket: a counter
+or UUID works. The SDK does not generate IDs, deduplicate requests, or wait for a
+server acknowledgment when a send method returns.
+
+```typescript
+// Register listeners before sending; replies can arrive in any order.
+ws.on('requestAck', ({ requestId, requestType }) => {
+  console.log('Setting applied:', requestId, requestType);
+});
+ws.on('error', ({ requestId, error }) => {
+  console.error('Request failed:', requestId, error);
+});
+ws.on('rawFrame', (frame) => {
+  if (frame.type === 'message_received' && frame.requestId === 'chat-1') {
+    console.log('Chat stored:', frame.messageId);
+  }
+});
+
+ws.sendMessage({ role: 'user', content: 'Hello' }, { requestId: 'chat-1' });
+ws.setSemanticAugmentation(true, { requestId: 'settings-1' });
+ws.send({ type: 'load_thread_history', threadId: 'thread_123', requestId: 'history-1' });
+```
+
+The optional second argument is supported by `sendMessage`, `sendMessageAsync`,
+`setContinuationMode`, `setTruncationStrategy`, `setMaxKbCharsPerChunk`,
+`setSemanticAugmentation`, `continueRun`, and `cancelRun`. For example,
+`cancelRun(undefined, { requestId: 'cancel-1' })` targets the current run.
+Raw `send`/`sendAsync` take `requestId` directly on the frame.
+
+Normalized events preserve an echoed `requestId`, as do `rawFrame`/`frame`.
+The three truncation/KB/semantic setters reply with `requestAck`;
+continuation-mode changes use the existing `continuationModeUpdated` event.
+Setters with an ID require an open connection and throw before changing local settings
+when disconnected. Calls without an ID retain their existing behavior.
+
+A request can produce multiple replies. Shared run events continue to use their
+run/message identifiers, and unsolicited events need not have a request ID.
+This requires a server with native request correlation support; older servers will
+not echo the ID. Unknown commands and native `auth` requests receive correlated
+errors on supported servers; authentication still happens during connection setup.
+
+Use `ws.send({ type: 'ping', requestId: 'ping-1' })` and the `pong` event for a
+correlated ping. This wakes the Durable Object. Keep sending the exact ID-free
+`{"type":"ping"}` frame for hibernation-friendly keepalives.
+
 ### WebSocket Events
 
 The WebSocket client emits the following events:
@@ -360,6 +408,8 @@ The WebSocket client emits the following events:
 - `continueRunResult` - Response to a `continue_run` request (`{ status, runId, error? }`)
 
 #### Other Events
+- `requestAck` - Acknowledgment of a correlated setting update (`{ type, requestId, requestType }`)
+- `pong` - Keepalive reply with optional `requestId` and `timestamp`
 - `rawFrame` / `frame` - Every inbound Ragwalla frame before SDK normalization. Durable Object proxies can relay this object directly to browsers to preserve upstream frame shapes, including future frame types.
 - `status` - Transient status/progress updates (e.g., tool execution progress)
 - `threadHistory` - Thread message history (`{ threadId, messages, messageCount, latestRun }`). `threadId` is always populated by the server, so this frame identifies its own thread. `latestRun` has three states — **absent** (server predates the field; run state unknown), `null` (server confirms the thread has no runs), or `{id, status, lastError}` — for telling a live-but-silent run from a dead one. Check with `'latestRun' in payload` before reading it; do not treat absent as null. Note `messages[].createdAt` is unix **seconds**, unlike `thread_info.createdAt` which is ISO-8601.
