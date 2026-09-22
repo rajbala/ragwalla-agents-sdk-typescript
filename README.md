@@ -211,6 +211,18 @@ await ragwalla.agents.refreshTools(agent.id);
 
 ### Delegation & Child Agents
 
+Agents can delegate and be delegated to by default. Opt out at creation time:
+
+```typescript
+const isolated = await ragwalla.agents.create({
+  name: 'Isolated Reviewer',
+  instructions: 'Review the text you are given.',
+  executionMode: 'execution-only',
+  canDelegate: false,
+  canBeDelegatedTo: false,
+});
+```
+
 ```typescript
 // Grant delegation: allow agent to delegate to an orchestrator
 await ragwalla.agents.grantDelegationPermission(agent.id, orchestratorId, 'Orchestrator');
@@ -409,7 +421,7 @@ The WebSocket client emits the following events:
 #### Message Events
 - `message` - Generic message event (receives all message types)
 - `chunk` - Streaming content chunk (`{ content, messageId }`)
-- `complete` - Message completion (`{ messageId }`)
+- `complete` - A run's terminal frame (`{ messageId, runId?, failed?, cancelled?, reason?, error?, usage? }`). `failed` or `cancelled` set means the run did NOT succeed; neither means completed. Fields are present only when the server sent them — absent is "not reported", not `false`.
 - `messageCreated` - New message started (`{ messageId, role }`)
 - `resume` - On reconnect, the current visible text of the in-flight message bubble (`{ messageId, content }`). Replace the bubble body with `content`, then continue appending live `chunk`s.
 
@@ -431,7 +443,7 @@ The WebSocket client emits the following events:
 - `rawFrame` / `frame` - Every inbound Ragwalla frame before SDK normalization. Durable Object proxies can relay this object directly to browsers to preserve upstream frame shapes, including future frame types.
 - `status` - Transient status/progress updates (e.g., tool execution progress)
 - `threadHistory` - Thread message history (`{ threadId, messages, messageCount, latestRun }`). `threadId` is always populated by the server, so this frame identifies its own thread. `latestRun` has three states — **absent** (server predates the field; run state unknown), `null` (server confirms the thread has no runs), or `{id, status, lastError}` — for telling a live-but-silent run from a dead one. Check with `'latestRun' in payload` before reading it; do not treat absent as null. Note `messages[].createdAt` is unix **seconds**, unlike `thread_info.createdAt` which is ISO-8601.
-- `tokenUsage` - Token usage statistics
+- `tokenUsage` - Emitted after each LLM call a run makes (`{ runId, model, call, totals }`). `call` is that call's `{ promptTokens, completionTokens, cachedTokens }`; `totals` is the run's cumulative `{ inputTokens, outputTokens, cachedInputTokens, llmCallCount, models }`, so a missed frame is recovered by the next. Requires a server that emits `token_usage`.
 - `error` - Error occurred
 - `rawMessage` - Unhandled message types (for debugging)
 
@@ -504,6 +516,47 @@ ws.on('message', (message) => {
 await ws.connect(agent.id, 'session-id', token);
 ws.sendMessage({ role: 'user', content: 'Hello!' });
 ```
+
+### Run to Completion
+
+For server-side callers that need one answer rather than a stream, `runToCompletion`
+sends a message and resolves when the run it starts has ended:
+
+```typescript
+import { RunToCompletionError } from '@ragwalla/agents-sdk';
+
+try {
+  const result = await ws.runToCompletion(
+    { role: 'user', content: 'Summarize this document.' },
+    { requestId: crypto.randomUUID(), timeoutMs: 120_000 },
+  );
+  if (result.status === 'completed') {
+    console.log(result.text);
+  } else {
+    console.error('Run', result.runId, result.status, result.error);
+  }
+  // Present only when the server reported usage. 'terminal' totals are final;
+  // 'stream' totals may undercount if frames were missed across a reconnect.
+  console.log(result.usage);
+} catch (error) {
+  if (error instanceof RunToCompletionError) {
+    // request_failed | timeout | aborted | connection_lost
+    console.error(error.code, error.details);
+  }
+}
+```
+
+It correlates through the native prompt/run correlation above — `requestId` →
+`run_started` → `runId` — so it ignores frames from other runs on the same socket.
+The server streams one run per socket (a new message rebinds the socket), so one
+`runToCompletion` may wait per connection at a time; a second concurrent call rejects.
+Use a separate connection per concurrent run.
+It resolves with `status: 'completed' | 'failed' | 'cancelled'` whenever the server
+reports an outcome, and rejects with `RunToCompletionError` only when it cannot observe
+one. On a timeout, an abort (`signal`), or a run-scoped `error`, it sends a `cancel_run`
+naming the run so an abandoned wait does not leave the run executing. It never resends
+the message: after a dropped socket the client reconnects to the thread and the server
+resumes the in-flight message.
 
 ### Manual Continuation Workflow
 

@@ -1,4 +1,15 @@
-import { WebSocketMessage, ChatMessage, TruncationStrategy, isTerminalRunStatus } from '../types/index.js';
+import {
+  WebSocketMessage,
+  ChatMessage,
+  TruncationStrategy,
+  isTerminalRunStatus,
+  type CompleteEvent,
+  type LlmCallUsage,
+  type RunOutcome,
+  type RunResult,
+  type RunUsageTotals,
+  type TokenUsageEvent,
+} from '../types/index.js';
 
 // Universal WebSocket interface
 interface UniversalWebSocket {
@@ -168,6 +179,60 @@ export interface WebSocketRequestOptions {
   requestId?: string;
 }
 
+export interface RunToCompletionOptions {
+  /**
+   * Required. Correlates this send with its `message_received`/`run_started` replies, which
+   * is how the run's id is learned. Unique among outstanding requests on this socket.
+   */
+  requestId: string;
+  /** Give up after this many milliseconds. The run is cancelled when its id is known. */
+  timeoutMs?: number;
+  /** Stop waiting. The run is cancelled when its id is known. */
+  signal?: AbortSignal;
+}
+
+export type RunToCompletionErrorCode =
+  /** The server refused the message before a run existed (e.g. a disabled agent). */
+  | 'request_failed'
+  | 'timeout'
+  | 'aborted'
+  /** The socket closed and will not reconnect; the run's outcome is unknown. */
+  | 'connection_lost';
+
+/**
+ * `runToCompletion` could not observe the run's outcome. Distinct from a run that
+ * FAILED — that resolves with `status: 'failed'`, because the server reported it.
+ */
+export class RunToCompletionError extends Error {
+  constructor(
+    readonly code: RunToCompletionErrorCode,
+    message: string,
+    readonly details: {
+      requestId: string;
+      runId?: string;
+      threadId?: string;
+      userMessageId?: string;
+      /** The error frame's payload, for `request_failed`. */
+      serverError?: unknown;
+      /**
+       * True when a `cancel_run` for `runId` was sent. It is a request: the run may
+       * already have finished, and a lost socket cannot carry it at all.
+       */
+      cancelRequested: boolean;
+    },
+  ) {
+    super(message);
+    this.name = 'RunToCompletionError';
+  }
+}
+
+/**
+ * After a reconnect, a terminal `run_state` is followed in the same synchronous server batch
+ * by the run's `message_created`/`resume` frames, which carry its final text. How long to
+ * wait for them before settling with the text already seen.
+ */
+const RUN_STATE_SETTLE_MS = 1_000;
+
 export interface WebSocketConfig {
   baseURL: string; // Required - must be https://.../v1 or wss://.../v1
   reconnectAttempts?: number;
@@ -233,6 +298,9 @@ export class RagwallaWebSocket {
   // The in-flight assistant message id (the bubble currently streaming). Sent as
   // resume_message_id on reconnect so the worker resumes the right message (§6a).
   private activeMessageId: string | null = null;
+  // Pending runToCompletion() waits. disconnect() removes the socket's handlers before
+  // closing it, so no 'disconnected' event reaches them — it must end them directly.
+  private runWaiters: Set<() => void> = new Set();
 
   constructor(config: WebSocketConfig) {
     this.validateAndSetWebSocketURL(config.baseURL);
@@ -704,6 +772,7 @@ export class RagwallaWebSocket {
     this.invalidatePendingReconnects();
     this.cancelActiveConnect('WebSocket connection cancelled');
     this.closeCurrentSocket();
+    for (const end of [...this.runWaiters]) end();
   }
 
   /**
@@ -845,6 +914,264 @@ export class RagwallaWebSocket {
   }
 
   /**
+   * Send one message and wait for the run it starts to end.
+   *
+   * Correlation is the worker's own prompt/run correlation, not a scheme of this helper's:
+   * the send carries `requestId`, which `message_received` and `run_started` echo, and
+   * `run_started` names the run. Every later frame for that run carries its `runId`, so
+   * frames from other runs sharing this socket are ignored.
+   *
+   * Resolves when the server reports an outcome:
+   *  - `complete` → completed, failed, or cancelled, from its flags;
+   *  - a run-scoped `error` → failed (the execution-only path ends a failed run this way,
+   *    with no `complete`);
+   *  - `run_cancelled` → cancelled;
+   *  - after a reconnect, a terminal `run_state` → its status, once the run's final text
+   *    (`resume`) has arrived.
+   *
+   * Rejects with {@link RunToCompletionError} when it cannot observe an outcome: a refusal
+   * before any run existed, a timeout, an abort, or a socket that will not reconnect. On a
+   * timeout, an abort, or a run-scoped `error`, a `cancel_run` naming the run is sent when
+   * its id is known, so abandoning the wait does not leave the run executing. A wait that
+   * ends before `run_started` cannot cancel anything: without the id, the only cancel the
+   * protocol offers is "this connection's current run", which may be someone else's.
+   *
+   * Never resends. After a drop the SDK reconnects to the thread and the worker resumes the
+   * in-flight message on the new socket; sending again would start a second run.
+   */
+  runToCompletion(message: ChatMessage, options: RunToCompletionOptions): Promise<RunResult> {
+    const { requestId, timeoutMs, signal } = options;
+    if (!requestId) {
+      return Promise.reject(new Error('runToCompletion requires a requestId'));
+    }
+    // The worker delivers a run's frames to the sockets bound to that run, and a socket is
+    // bound to ONE run: sending a second message rebinds it. A second concurrent wait would
+    // silently starve the first of its terminal frame until it timed out and cancelled a
+    // run that was fine. Refuse instead; use one socket per concurrent run.
+    if (this.runWaiters.size > 0) {
+      return Promise.reject(new Error(
+        'runToCompletion is already waiting on this socket; the server streams one run per ' +
+        'socket, so use a separate connection for each concurrent run'
+      ));
+    }
+
+    return new Promise<RunResult>((resolve, reject) => {
+      let runId: string | undefined;
+      let threadId: string | undefined;
+      let userMessageId: string | undefined;
+      // messageId -> text. A Map keeps first-appearance order when a resume replaces a value.
+      const texts = new Map<string, string>();
+      let streamTotals: RunUsageTotals | undefined;
+      let dropped = false;
+      let reconnected = false;
+      let settled = false;
+      let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+      let settleTimer: ReturnType<typeof setTimeout> | null = null;
+      let completedByRunState = false;
+
+      const cleanup = (): void => {
+        settled = true;
+        this.off('rawFrame', onFrame);
+        this.off('disconnected', onDisconnected);
+        this.off('connected', onConnected);
+        this.off('reconnectFailed', onReconnectFailed);
+        this.runWaiters.delete(onManualDisconnect);
+        signal?.removeEventListener('abort', onAbort);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (settleTimer) clearTimeout(settleTimer);
+      };
+
+      const requestCancel = (): boolean => {
+        if (!runId) return false;
+        try {
+          this.cancelRun(runId);
+          return true;
+        } catch {
+          return false; // not connected: there is no socket to carry it
+        }
+      };
+
+      const fail = (
+        code: RunToCompletionErrorCode,
+        reason: string,
+        extra: { cancelRequested: boolean; serverError?: unknown },
+      ): void => {
+        if (settled) return;
+        cleanup();
+        reject(new RunToCompletionError(code, reason, {
+          requestId,
+          ...(runId !== undefined && { runId }),
+          ...(threadId !== undefined && { threadId }),
+          ...(userMessageId !== undefined && { userMessageId }),
+          ...(extra.serverError !== undefined && { serverError: extra.serverError }),
+          cancelRequested: extra.cancelRequested,
+        }));
+      };
+
+      const finish = (
+        status: RunOutcome,
+        extra: { error?: unknown; reason?: string; usage?: RunUsageTotals } = {},
+      ): void => {
+        if (settled || !runId) return;
+        cleanup();
+        const usage = extra.usage
+          ? { ...extra.usage, source: 'terminal' as const }
+          : streamTotals
+            ? { ...streamTotals, source: 'stream' as const }
+            : undefined;
+        resolve({
+          runId,
+          ...(threadId !== undefined && { threadId }),
+          ...(userMessageId !== undefined && { userMessageId }),
+          status,
+          text: [...texts.values()].join(''),
+          messageIds: [...texts.keys()].filter((id) => id !== ''),
+          ...(extra.error !== undefined && { error: extra.error }),
+          ...(extra.reason !== undefined && { reason: extra.reason }),
+          ...(usage && { usage }),
+          reconnected,
+        });
+      };
+
+      const onFrame = (frame: WebSocketMessage): void => {
+        if (settled) return;
+
+        if (frame.requestId === requestId && !runId) {
+          if (frame.type === 'message_received') {
+            userMessageId = frame.messageId ?? userMessageId;
+            threadId = frame.threadId ?? threadId;
+            return;
+          }
+          if (frame.type === 'run_started') {
+            runId = frame.runId;
+            threadId = frame.threadId ?? threadId;
+            userMessageId = frame.userMessageId ?? userMessageId;
+            return;
+          }
+          if (frame.type === 'error') {
+            const raw = frame.error;
+            const text = typeof raw === 'string' ? raw : raw?.message ?? 'Request failed';
+            fail('request_failed', text, { cancelRequested: false, serverError: raw });
+            return;
+          }
+        }
+
+        // A drop can lose run_started, which was addressed to the old socket. The reconnect's
+        // run_state names the run's initiating prompt, so adopt the run that is ours.
+        if (
+          !runId && frame.type === 'run_state' && frame.runId &&
+          userMessageId !== undefined && frame.userMessageId === userMessageId
+        ) {
+          runId = frame.runId;
+        }
+
+        if (!runId || frame.runId !== runId) return;
+
+        // A terminal run_state is followed, in the same server batch, by the run's final
+        // message_created/resume. Anything else means that text is not coming.
+        if (completedByRunState && frame.type !== 'message_created' && frame.type !== 'resume') {
+          finish('completed');
+          return;
+        }
+
+        switch (frame.type) {
+          case 'message_created':
+            if (frame.messageId && !texts.has(frame.messageId)) texts.set(frame.messageId, '');
+            break;
+          case 'chunk': {
+            const key = frame.messageId ?? '';
+            texts.set(key, (texts.get(key) ?? '') + (frame.content ?? ''));
+            break;
+          }
+          case 'resume':
+            // The message's full visible text so far; live chunks continue from it.
+            if (frame.messageId) texts.set(frame.messageId, frame.content ?? '');
+            if (completedByRunState) finish('completed');
+            break;
+          case 'token_usage':
+            if (frame.totals) streamTotals = frame.totals;
+            break;
+          case 'complete':
+            finish(frame.cancelled ? 'cancelled' : frame.failed ? 'failed' : 'completed', {
+              error: frame.error,
+              reason: frame.reason,
+              usage: frame.usage,
+            });
+            break;
+          case 'run_cancelled':
+            finish('cancelled');
+            break;
+          case 'error':
+            // Not every run-scoped error is terminal (assistant mode sends one when its stream
+            // ends early and the run may still be executing), so make sure it stops.
+            requestCancel();
+            finish('failed', { error: frame.error });
+            break;
+          case 'run_state':
+            if (frame.runStatus === 'completed') {
+              completedByRunState = true;
+              settleTimer = setTimeout(() => finish('completed'), RUN_STATE_SETTLE_MS);
+            } else if (frame.runStatus === 'cancelled') {
+              finish('cancelled');
+            } else if (isTerminalRunStatus(frame.runStatus)) {
+              finish('failed', { reason: frame.runStatus });
+            }
+            break;
+        }
+      };
+
+      const onDisconnected = (): void => {
+        dropped = true;
+        // The close handler schedules the reconnect synchronously after emitting this event.
+        // If none was scheduled, none is coming and the outcome cannot be observed here.
+        queueMicrotask(() => {
+          if (!settled && !this.isConnected() && !this.reconnectTimer && !this.reconnectInFlight) {
+            fail('connection_lost', 'The socket closed and will not reconnect', { cancelRequested: false });
+          }
+        });
+      };
+      const onConnected = (): void => {
+        if (dropped) reconnected = true;
+      };
+      const onReconnectFailed = (): void => {
+        fail('connection_lost', 'The socket closed and reconnection failed', { cancelRequested: false });
+      };
+      const onManualDisconnect = (): void => {
+        fail('connection_lost', 'disconnect() was called while waiting', { cancelRequested: false });
+      };
+      const onAbort = (): void => {
+        const cancelRequested = requestCancel();
+        fail('aborted', 'runToCompletion was aborted', { cancelRequested });
+      };
+
+      if (signal?.aborted) {
+        reject(new RunToCompletionError('aborted', 'runToCompletion was aborted before sending', {
+          requestId,
+          cancelRequested: false,
+        }));
+        return;
+      }
+
+      this.on('rawFrame', onFrame);
+      this.on('disconnected', onDisconnected);
+      this.on('connected', onConnected);
+      this.on('reconnectFailed', onReconnectFailed);
+      this.runWaiters.add(onManualDisconnect);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (timeoutMs !== undefined) {
+        timeoutTimer = setTimeout(() => {
+          const cancelRequested = requestCancel();
+          fail('timeout', `The run did not finish within ${timeoutMs}ms`, { cancelRequested });
+        }, timeoutMs);
+      }
+
+      this.sendMessageAsync(message, { requestId }).catch((error) => {
+        fail('request_failed', `Send failed: ${errorMessage(error)}`, { cancelRequested: false });
+      });
+    });
+  }
+
+  /**
    * Check if WebSocket is connected
    */
   isConnected(): boolean {
@@ -927,13 +1254,25 @@ export class RagwallaWebSocket {
           messageId: (message as any).messageId
         });
         break;
-      case 'complete':
+      case 'complete': {
         // Message completion event — the in-flight message is done.
         this.activeMessageId = null;
-        emit('complete', {
-          messageId: (message as any).messageId
-        });
+        // The worker sends the outcome on this frame: `failed`/`cancelled` (neither means
+        // completed), `reason`, `error`, and the stamped `runId`. Only `messageId` used to be
+        // forwarded, so a failed or cancelled run was indistinguishable from a successful one.
+        // Each field is forwarded only when present: absent means "not reported", not false.
+        const event: CompleteEvent = {
+          messageId: message.messageId,
+          ...(message.runId !== undefined && { runId: message.runId }),
+          ...(message.failed !== undefined && { failed: message.failed }),
+          ...(message.cancelled !== undefined && { cancelled: message.cancelled }),
+          ...(message.reason !== undefined && { reason: message.reason }),
+          ...(message.error !== undefined && { error: message.error }),
+          ...(message.usage !== undefined && { usage: message.usage }),
+        };
+        emit('complete', event);
         break;
+      }
       case 'message_created':
         // New message created event — this is now the in-flight message to resume.
         this.activeMessageId = (message as any).messageId;
@@ -1017,9 +1356,18 @@ export class RagwallaWebSocket {
           total: (message as any).total
         });
         break;
-      case 'token_usage':
-        emit('tokenUsage', message.data);
+      case 'token_usage': {
+        // Top-level fields, like every other worker frame. This used to emit `message.data`,
+        // a wrapper the worker never sends — so the event always carried `undefined`.
+        const event: Omit<TokenUsageEvent, 'requestId'> = {
+          ...(message.runId !== undefined && { runId: message.runId }),
+          ...(message.model !== undefined && { model: message.model }),
+          call: message.call as LlmCallUsage,
+          totals: message.totals as RunUsageTotals,
+        };
+        emit('tokenUsage', event);
         break;
+      }
       case 'run_paused':
         emit('runPaused', message.data || message);
         break;
@@ -1054,6 +1402,13 @@ export class RagwallaWebSocket {
         break;
       }
       case 'run_started': {
+        // The thread the run actually executes on. Persisted for the same reason as
+        // thread_info: a drop before any `connected`/`thread_info` named the thread (the
+        // first message on a new thread) would otherwise reconnect without thread_id, and
+        // the worker could not reattach this socket to the run it just started.
+        if (message.threadId) {
+          this.activeThreadId = message.threadId;
+        }
         emit('runStarted', {
           threadId: message.threadId,
           userMessageId: message.userMessageId,

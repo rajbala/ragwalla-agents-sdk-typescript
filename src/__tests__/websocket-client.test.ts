@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { RagwallaWebSocket } from '../client/websocket-client';
+import { RagwallaWebSocket, RunToCompletionError } from '../client/websocket-client';
+import type { RunResult } from '../types/index';
 
 /**
  * Tests for the reconnect/resume client protocol (RECONNECT_RESUME_SPEC §6a):
@@ -925,5 +926,347 @@ describe('prompt/run correlation', () => {
     expect(started).toHaveBeenCalledWith({ threadId: 'thr_1', userMessageId: 'msg_1', runId: 'run_1' });
     expect(state).toHaveBeenCalledWith({ runId: 'run_1', userMessageId: 'msg_1', runStatus: 'failed', activeTool: null });
     client.disconnect();
+  });
+});
+
+describe('terminal and usage frames', () => {
+  it('complete forwards the outcome the worker sent, and adds nothing it did not', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const complete = jest.fn();
+    client.on('complete', complete);
+    FakeWebSocket.last.frame({
+      type: 'complete', runId: 'run_1', failed: true, reason: 'expired',
+      error: { code: 'expired', message: 'Run expired' },
+    });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_2', cancelled: true });
+    FakeWebSocket.last.frame({ type: 'complete', messageId: 'msg_3' });
+    expect(complete.mock.calls.map(([event]) => event)).toEqual([
+      { messageId: undefined, runId: 'run_1', failed: true, reason: 'expired', error: { code: 'expired', message: 'Run expired' } },
+      { messageId: undefined, runId: 'run_2', cancelled: true },
+      { messageId: 'msg_3' },
+    ]);
+    expect(complete.mock.calls[2][0]).not.toHaveProperty('failed');
+    client.disconnect();
+  });
+
+  it('tokenUsage reads the top-level frame fields', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const usage = jest.fn();
+    client.on('tokenUsage', usage);
+    const call = { promptTokens: 1200, completionTokens: 300, cachedTokens: 1000 };
+    const totals = { inputTokens: 1200, outputTokens: 300, cachedInputTokens: 1000, llmCallCount: 1, models: ['m'] };
+    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', model: 'm', call, totals });
+    expect(usage).toHaveBeenCalledWith({ runId: 'run_1', model: 'm', call, totals });
+    client.disconnect();
+  });
+
+  it('run_started persists its thread so a reconnect during the first reply reattaches', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_new', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'x' });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('thread_id')).toBe('thr_new');
+    expect(url.searchParams.get('resume_message_id')).toBe('msg_a');
+    client.disconnect();
+  });
+});
+
+describe('runToCompletion', () => {
+  const PROMPT = { role: 'user' as const, content: 'review this' };
+  const TOTALS = { inputTokens: 5000, outputTokens: 800, cachedInputTokens: 4000, llmCallCount: 2, models: ['m'] };
+
+  type Outcome = { ok: true; result: RunResult } | { ok: false; error: RunToCompletionError };
+
+  /** Start a run and let the async send reach the socket. Settlement is captured, never thrown. */
+  async function start(
+    client: RagwallaWebSocket,
+    options: { requestId?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<{ outcome: Promise<Outcome> }> {
+    const outcome = client
+      .runToCompletion(PROMPT, { requestId: 'req-1', ...options })
+      .then((result): Outcome => ({ ok: true, result }), (error): Outcome => ({ ok: false, error }));
+    await flushMicrotasks();
+    return { outcome };
+  }
+
+  function started(socket: FakeWebSocket, runId = 'run_1'): void {
+    socket.frame({ type: 'message_received', requestId: 'req-1', threadId: 'thr_1', messageId: 'msg_u' });
+    socket.frame({ type: 'run_started', requestId: 'req-1', threadId: 'thr_1', userMessageId: 'msg_u', runId });
+  }
+
+  function sentTypes(socket: FakeWebSocket): Array<Record<string, unknown>> {
+    return socket.sent.map((raw) => JSON.parse(raw));
+  }
+
+  it('sends once with the requestId and resolves with the run\'s text and terminal usage', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    const socket = FakeWebSocket.last;
+
+    started(socket);
+    socket.frame({ type: 'message_created', runId: 'run_1', messageId: 'msg_a' });
+    socket.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'Hello' });
+    socket.frame({ type: 'chunk', runId: 'run_other', messageId: 'msg_x', content: 'NOT OURS' });
+    socket.frame({ type: 'complete', runId: 'run_other', messageId: 'msg_x' });
+    socket.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: ', world' });
+    socket.frame({ type: 'complete', runId: 'run_1', messageId: 'msg_a', usage: TOTALS });
+
+    expect(await outcome).toEqual({
+      ok: true,
+      result: {
+        runId: 'run_1', threadId: 'thr_1', userMessageId: 'msg_u', status: 'completed',
+        text: 'Hello, world', messageIds: ['msg_a'],
+        usage: { ...TOTALS, source: 'terminal' }, reconnected: false,
+      },
+    });
+    const sent = sentTypes(socket);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ type: 'message', requestId: 'req-1', content: 'review this' });
+  });
+
+  it('falls back to the last token_usage totals, and reports no usage rather than zero', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const first = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: { ...TOTALS, llmCallCount: 1 } });
+    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: TOTALS });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    const withStream = await first.outcome;
+    expect(withStream.ok && withStream.result.usage).toEqual({ ...TOTALS, source: 'stream' });
+
+    const second = await start(client, { requestId: 'req-2' });
+    FakeWebSocket.last.frame({ type: 'run_started', requestId: 'req-2', threadId: 'thr_1', runId: 'run_2' });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_2' });
+    const without = await second.outcome;
+    expect(without.ok && without.result).not.toHaveProperty('usage');
+  });
+
+  it('reports failed and cancelled outcomes from complete', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const failed = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1', failed: true, reason: 'expired', error: { code: 'expired' } });
+    expect(await failed.outcome).toMatchObject({
+      ok: true, result: { status: 'failed', reason: 'expired', error: { code: 'expired' } },
+    });
+
+    const cancelled = await start(client, { requestId: 'req-2' });
+    FakeWebSocket.last.frame({ type: 'run_started', requestId: 'req-2', runId: 'run_2' });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_2', cancelled: true });
+    expect(await cancelled.outcome).toMatchObject({ ok: true, result: { status: 'cancelled' } });
+  });
+
+  it('treats a run-scoped error as failed and cancels the run in case it is still executing', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'model exploded' });
+    expect(await outcome).toMatchObject({ ok: true, result: { status: 'failed', error: 'model exploded' } });
+    expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
+  });
+
+  it('rejects a refusal before any run exists, and cancels nothing', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    FakeWebSocket.last.frame({ type: 'error', requestId: 'req-2', error: 'someone else' });
+    FakeWebSocket.last.frame({ type: 'error', requestId: 'req-1', error: 'This agent has been disabled.' });
+    const result = await outcome;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBeInstanceOf(RunToCompletionError);
+    expect(result.error.code).toBe('request_failed');
+    expect(result.error.message).toBe('This agent has been disabled.');
+    expect(result.error.details).toEqual({
+      requestId: 'req-1', serverError: 'This agent has been disabled.', cancelRequested: false,
+    });
+    expect(FakeWebSocket.last.sent).toHaveLength(1);
+  });
+
+  it('on timeout cancels the named run', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client, { timeoutMs: 5 });
+    started(FakeWebSocket.last);
+    const result = await outcome;
+    expect(result).toMatchObject({ ok: false, error: { code: 'timeout', details: { runId: 'run_1', cancelRequested: true } } });
+    expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
+  });
+
+  it('on timeout before run_started sends no cancel — an unnamed cancel_run targets whatever run is current', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client, { timeoutMs: 5 });
+    FakeWebSocket.last.frame({ type: 'message_received', requestId: 'req-1', threadId: 'thr_1', messageId: 'msg_u' });
+    const result = await outcome;
+    expect(result).toMatchObject({
+      ok: false, error: { code: 'timeout', details: { userMessageId: 'msg_u', cancelRequested: false } },
+    });
+    expect(result.ok || result.error.details).not.toHaveProperty('runId');
+    expect(FakeWebSocket.last.sent).toHaveLength(1);
+  });
+
+  it('abort cancels the run; an already-aborted signal sends nothing', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const controller = new AbortController();
+    const { outcome } = await start(client, { signal: controller.signal });
+    started(FakeWebSocket.last);
+    controller.abort();
+    expect(await outcome).toMatchObject({ ok: false, error: { code: 'aborted', details: { cancelRequested: true } } });
+    expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
+
+    const before = FakeWebSocket.last.sent.length;
+    const again = await start(client, { requestId: 'req-2', signal: controller.signal });
+    expect(await again.outcome).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    expect(FakeWebSocket.last.sent).toHaveLength(before);
+  });
+
+  it('survives a reconnect: resume replaces the message text and a terminal run_state ends the run', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'Hel' });
+
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('thread_id')).toBe('thr_1');
+    expect(url.searchParams.get('resume_message_id')).toBe('msg_a');
+    // The worker's reconnect batch: run_state, then message_created, then resume.
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', userMessageId: 'msg_u', activeTool: null });
+    FakeWebSocket.last.frame({ type: 'message_created', runId: 'run_1', messageId: 'msg_a' });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'Hello, world' });
+
+    expect(await outcome).toMatchObject({
+      ok: true, result: { status: 'completed', text: 'Hello, world', reconnected: true },
+    });
+    // Never resent: the first socket carried the only message frame, the second none.
+    expect(FakeWebSocket.instances.flatMap((s) => s.sent.map((raw) => JSON.parse(raw).type))).toEqual(['message']);
+  });
+
+  it('adopts the run from run_state when the drop lost run_started', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client, { threadId: 'thr_1' });
+    const { outcome } = await start(client);
+    FakeWebSocket.last.frame({ type: 'message_received', requestId: 'req-1', threadId: 'thr_1', messageId: 'msg_u' });
+
+    await reconnectUrl(client);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_someone', runStatus: 'in_progress', userMessageId: 'msg_other' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', userMessageId: 'msg_u' });
+    FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'done' });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1', messageId: 'msg_a' });
+
+    expect(await outcome).toMatchObject({ ok: true, result: { runId: 'run_1', text: 'done', status: 'completed' } });
+  });
+
+  it('a completed run_state followed by any other frame for the run settles without waiting', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'partial' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed' });
+    let done = false;
+    void outcome.then(() => { done = true; });
+    FakeWebSocket.last.frame({ type: 'typing', runId: 'run_1', isTyping: false });
+    await flushMicrotasks();
+    // Settled by the frame itself, not by the 1s settle-window fallback.
+    expect(done).toBe(true);
+    expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'partial' } });
+  });
+
+  it('a completed run_state with no text to follow settles after the settle window', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    try {
+      const client = newClient();
+      const connecting = client.connect('agent', 'conn', 'tok');
+      FakeWebSocket.last.fire('open', {});
+      await connecting;
+      const { outcome } = await start(client);
+      started(FakeWebSocket.last);
+      FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed' });
+      let done = false;
+      void outcome.then(() => { done = true; });
+      jest.advanceTimersByTime(999);
+      await flushMicrotasks();
+      expect(done).toBe(false);
+      jest.advanceTimersByTime(1);
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: '' } });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('maps failed and expired run_state to failed at once', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'expired' });
+    expect(await outcome).toMatchObject({ ok: true, result: { status: 'failed', reason: 'expired' } });
+  });
+
+  it('rejects connection_lost when the socket closes and no reconnect is coming', async () => {
+    const client = newClient(); // reconnectAttempts: 0
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.fire('close', { code: 1006, reason: 'gone' });
+    expect(await outcome).toMatchObject({
+      ok: false, error: { code: 'connection_lost', details: { runId: 'run_1', cancelRequested: false } },
+    });
+  });
+
+  it('rejects connection_lost when disconnect() is called while waiting', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    client.disconnect();
+    expect(await outcome).toMatchObject({ ok: false, error: { code: 'connection_lost' } });
+  });
+
+  it('removes its listeners once settled', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const listeners = (client as any).listeners as Map<string, Set<unknown>>;
+    const sizes = () => ['rawFrame', 'disconnected', 'connected', 'reconnectFailed']
+      .map((event) => listeners.get(event)?.size ?? 0);
+    const { outcome } = await start(client);
+    expect(sizes()).toEqual([1, 1, 1, 1]);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    await outcome;
+    expect(sizes()).toEqual([0, 0, 0, 0]);
+    expect((client as any).runWaiters.size).toBe(0);
+  });
+
+  it('refuses a second concurrent wait on the same socket, and allows one after the first settles', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const first = await start(client);
+    await expect(client.runToCompletion(PROMPT, { requestId: 'req-2' })).rejects.toThrow('one run per socket');
+    expect(FakeWebSocket.last.sent).toHaveLength(1);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    expect(await first.outcome).toMatchObject({ ok: true });
+    const second = await start(client, { requestId: 'req-2' });
+    FakeWebSocket.last.frame({ type: 'run_started', requestId: 'req-2', runId: 'run_2' });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_2' });
+    expect(await second.outcome).toMatchObject({ ok: true, result: { runId: 'run_2' } });
+  });
+
+  it('requires a requestId', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    await expect(client.runToCompletion(PROMPT, { requestId: '' })).rejects.toThrow('requires a requestId');
+    expect(FakeWebSocket.last.sent).toHaveLength(0);
   });
 });
