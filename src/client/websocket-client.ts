@@ -1105,7 +1105,8 @@ export class RagwallaWebSocket {
             // Not every run-scoped error is terminal (assistant mode sends one when its stream
             // ends early and the run may still be executing), so make sure it stops.
             requestCancel();
-            finish('failed', { error: frame.error });
+            // The execution-only path stamps the run's final totals here, as on `complete`.
+            finish('failed', { error: frame.error, usage: frame.usage });
             break;
           case 'run_state':
             if (frame.runStatus === 'completed') {

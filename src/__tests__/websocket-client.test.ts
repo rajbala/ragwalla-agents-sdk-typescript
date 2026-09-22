@@ -1072,6 +1072,17 @@ describe('runToCompletion', () => {
     expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
   });
 
+  it('takes terminal usage from a run-scoped error frame', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: { ...TOTALS, llmCallCount: 1 } });
+    FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'boom', usage: TOTALS });
+    const result = await outcome;
+    expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+  });
+
   it('rejects a refusal before any run exists, and cancels nothing', async () => {
     const client = newClient();
     await connectOpen(client);
