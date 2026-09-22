@@ -243,6 +243,15 @@ export class RunToCompletionError extends Error {
  */
 const RUN_STATE_SETTLE_MS = 1_000;
 
+/**
+ * After a run-scoped `error`, how long to wait for the run's actual outcome. Assistant mode
+ * sends such an error while the run may still execute; the cancel that follows it answers
+ * with `run_cancelled`, or the run ends with `complete` first. The execution-only path's
+ * error is itself the terminal frame, and nothing run-scoped follows it (the cancel reply for
+ * an ended run names no run), so after this window it settles as failed.
+ */
+const ERROR_OUTCOME_SETTLE_MS = 3_000;
+
 export interface WebSocketConfig {
   baseURL: string; // Required - must be https://.../v1 or wss://.../v1
   reconnectAttempts?: number;
@@ -1031,6 +1040,9 @@ export class RagwallaWebSocket {
       let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
       let settleTimer: ReturnType<typeof setTimeout> | null = null;
       let completedByRunState = false;
+      // A run-scoped error, held until the run's outcome is known (ERROR_OUTCOME_SETTLE_MS).
+      let errored: { error: unknown; usage?: RunUsageTotals } | undefined;
+      let errorTimer: ReturnType<typeof setTimeout> | null = null;
 
       const cleanup = (): void => {
         settled = true;
@@ -1042,6 +1054,7 @@ export class RagwallaWebSocket {
         signal?.removeEventListener('abort', onAbort);
         if (timeoutTimer) clearTimeout(timeoutTimer);
         if (settleTimer) clearTimeout(settleTimer);
+        if (errorTimer) clearTimeout(errorTimer);
       };
 
       const requestCancel = (): boolean => {
@@ -1163,14 +1176,18 @@ export class RagwallaWebSocket {
             });
             break;
           case 'run_cancelled':
-            finish('cancelled');
+            // After a run-scoped error this is usually the cancel that error prompted; keep why.
+            finish('cancelled', errored ? { error: errored.error } : {});
             break;
           case 'error':
-            // Not every run-scoped error is terminal (assistant mode sends one when its stream
-            // ends early and the run may still be executing), so make sure it stops.
+            // Not every run-scoped error is terminal: assistant mode sends one when its stream
+            // ends early and the run may still be executing. Stop it, then report what it
+            // actually became (ERROR_OUTCOME_SETTLE_MS) rather than releasing the socket on a
+            // guess. The execution-only path stamps the run's final totals on this frame.
+            if (errored) break;
+            errored = { error: frame.error, ...(frame.usage !== undefined && { usage: frame.usage }) };
             requestCancel();
-            // The execution-only path stamps the run's final totals here, as on `complete`.
-            finish('failed', { error: frame.error, usage: frame.usage });
+            errorTimer = setTimeout(() => finish('failed', errored), ERROR_OUTCOME_SETTLE_MS);
             break;
           case 'run_state':
             // The worker persists a run's totals before announcing each call, and reports them

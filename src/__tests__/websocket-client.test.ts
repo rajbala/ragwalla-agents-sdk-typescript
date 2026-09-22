@@ -1162,25 +1162,70 @@ describe('runToCompletion', () => {
     expect(await cancelled.outcome).toMatchObject({ ok: true, result: { status: 'cancelled' } });
   });
 
-  it('treats a run-scoped error as failed and cancels the run in case it is still executing', async () => {
-    const client = newClient();
-    await connectOpen(client);
-    const { outcome } = await start(client);
-    started(FakeWebSocket.last);
-    FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'model exploded' });
-    expect(await outcome).toMatchObject({ ok: true, result: { status: 'failed', error: 'model exploded' } });
-    expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
+  /** Run `body` with fake timers, a connected client, and a started run_1. */
+  async function withStartedRun(body: (outcome: Promise<Outcome>, isDone: () => boolean) => Promise<void>): Promise<void> {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    try {
+      const client = newClient();
+      const connecting = client.connect('agent', 'conn', 'tok');
+      FakeWebSocket.last.fire('open', {});
+      await connecting;
+      const { outcome } = await start(client);
+      started(FakeWebSocket.last);
+      let done = false;
+      void outcome.then(() => { done = true; });
+      await body(outcome, () => done);
+    } finally {
+      jest.useRealTimers();
+    }
+  }
+
+  it('after a run-scoped error, cancels the run and settles failed once nothing else comes', async () => {
+    // The execution-only path: the error is the terminal frame, and nothing run-scoped follows.
+    await withStartedRun(async (outcome, isDone) => {
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'model exploded' });
+      expect(sentTypes(FakeWebSocket.last)[1]).toEqual({ type: 'cancel_run', runId: 'run_1' });
+      jest.advanceTimersByTime(2_999);
+      await flushMicrotasks();
+      expect(isDone()).toBe(false);
+      jest.advanceTimersByTime(1);
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'failed', error: 'model exploded' } });
+    });
   });
 
   it('takes terminal usage from a run-scoped error frame', async () => {
-    const client = newClient();
-    await connectOpen(client);
-    const { outcome } = await start(client);
-    started(FakeWebSocket.last);
-    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: { ...TOTALS, llmCallCount: 1 } });
-    FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'boom', usage: TOTALS });
-    const result = await outcome;
-    expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    await withStartedRun(async (outcome) => {
+      FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: { ...TOTALS, llmCallCount: 1 } });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'boom', usage: TOTALS });
+      jest.advanceTimersByTime(3_000);
+      const result = await outcome;
+      expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    });
+  });
+
+  it('reports cancelled when the run was still executing and the cancel landed', async () => {
+    // Assistant mode's early stream end: the run was alive, and the cancel the error
+    // prompted is what ended it.
+    await withStartedRun(async (outcome) => {
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'Stream ended before the run reached a terminal state; reconnect to resume' });
+      FakeWebSocket.last.frame({ type: 'run_cancelled', runId: 'run_1' });
+      expect(await outcome).toMatchObject({
+        ok: true,
+        result: { status: 'cancelled', error: 'Stream ended before the run reached a terminal state; reconnect to resume' },
+      });
+    });
+  });
+
+  it('reports completed when the run finished before the cancel landed', async () => {
+    await withStartedRun(async (outcome) => {
+      FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'all done' });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'stream ended early' });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'and again' });
+      FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1', messageId: 'msg_a' });
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'all done' } });
+      // One cancel only: a repeated error neither re-cancels nor restarts the wait.
+      expect(sentTypes(FakeWebSocket.last).filter((f) => f.type === 'cancel_run')).toHaveLength(1);
+    });
   });
 
   it('rejects a refusal before any run exists, and cancels nothing', async () => {
