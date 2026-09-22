@@ -551,6 +551,9 @@ It correlates through the native prompt/run correlation above — `requestId` �
 The server streams one run per socket (a new message rebinds the socket), so while
 `runToCompletion` waits it holds the connection: a second `runToCompletion` rejects, and
 `sendMessage`/`sendMessageAsync`/`send`/`sendAsync` refuse any chat message until it settles.
+The reverse is not refused, because the client cannot always tell when a run it did not wait
+on has ended: do not start `runToCompletion` while a message sent with `sendMessage` is still
+running on the same connection — the new run takes the socket and the first loses its frames.
 Other frames (`cancelRun`, settings, ping) still pass. Use a separate connection per
 concurrent run.
 It resolves with `status: 'completed' | 'failed' | 'cancelled'` whenever the server

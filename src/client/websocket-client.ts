@@ -623,15 +623,16 @@ export class RagwallaWebSocket {
       throw new Error('WebSocket is not connected');
     }
 
+    this.ws.send(JSON.stringify(payload));
     // A new message starts a new turn: the previous run's resume ids no longer name what a
     // reconnect should recover. Left in place, a drop before this message's run_started
-    // resumed the old (possibly long-finished) run instead.
+    // resumed the old (possibly long-finished) run instead. Cleared only once the message is
+    // sent: one that fails to serialize or send starts no turn, and the old run still runs.
     if (isChatMessageFrame(payload)) {
       this.activeMessageId = null;
       this.activeRunId = null;
       this.runAwaitingFinalText = null;
     }
-    this.ws.send(JSON.stringify(payload));
   }
 
   private async ensureConnectedForSend(): Promise<void> {
@@ -1016,6 +1017,12 @@ export class RagwallaWebSocket {
    *
    * Never resends. After a drop the SDK reconnects to the thread and the worker resumes the
    * in-flight message on the new socket; sending again would start a second run.
+   *
+   * One run per socket, whoever sent it: the worker binds a socket to the run of the latest
+   * message, so calling this while a message sent with `sendMessage` is still running moves
+   * the socket to the new run and the first loses its remaining frames. That is not refused
+   * here — the client cannot always tell when such a run has ended (a run-scoped `error` may or
+   * may not be final), so a guard would refuse legitimate calls. Use a separate connection.
    */
   runToCompletion(message: ChatMessage, options: RunToCompletionOptions): Promise<RunResult> {
     const { requestId, timeoutMs, signal } = options;

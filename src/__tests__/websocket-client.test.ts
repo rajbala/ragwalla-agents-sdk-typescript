@@ -755,6 +755,17 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     client.disconnect();
   });
 
+  it('keeps the previous run\'s resume ids when a new message fails to send', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client, { threadId: 'thr_1' });
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => client.sendMessage({ role: 'user', content: 'x', metadata: cyclic } as any)).toThrow();
+    expect((await reconnectUrl(client)).searchParams.get('resume_run_id')).toBe('run_1');
+    client.disconnect();
+  });
+
   it('a terminal run_state that sends no final text clears the resume ids at once', async () => {
     const client = newReconnectClient();
     await connectOpen(client);
