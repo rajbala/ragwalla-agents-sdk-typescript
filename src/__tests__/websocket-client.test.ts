@@ -693,11 +693,12 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(url.searchParams.has('resume_message_id')).toBe(false);
   });
 
-  it('terminal run_state emits runState and clears the in-flight id', async () => {
+  it('a completed run_state keeps the resume ids until the run\'s final resume arrives', async () => {
     const client = newReconnectClient();
     await connectOpen(client);
     FakeWebSocket.last.frame({ type: 'thread_info', threadId: 'thr_1' });
-    FakeWebSocket.last.frame({ type: 'message_created', messageId: 'msg_1' });
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'message_created', runId: 'run_1', messageId: 'msg_1' });
 
     const runState = jest.fn();
     const runResumed = jest.fn();
@@ -705,10 +706,49 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     client.on('runResumed', runResumed); // removed event — must never fire
 
     FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
-
     expect(runState).toHaveBeenCalledWith({ runId: 'run_1', runStatus: 'completed', activeTool: null });
     expect(runResumed).not.toHaveBeenCalled();
-    expect((await reconnectUrl(client)).searchParams.has('resume_message_id')).toBe(false); // cleared
+
+    // Dropped before the final text: the reconnect still names the run and its message.
+    let url = await reconnectUrl(client);
+    expect(url.searchParams.get('resume_run_id')).toBe('run_1');
+    expect(url.searchParams.get('resume_message_id')).toBe('msg_1');
+
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_1', content: 'final' });
+    url = await reconnectUrl(client);
+    expect(url.searchParams.has('resume_run_id')).toBe(false);
+    expect(url.searchParams.has('resume_message_id')).toBe(false);
+    client.disconnect();
+  });
+
+  it('a terminal run_state that sends no final text clears the resume ids at once', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'thread_info', threadId: 'thr_1' });
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'message_created', runId: 'run_1', messageId: 'msg_1' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'failed', activeTool: null });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.has('resume_run_id')).toBe(false);
+    expect(url.searchParams.has('resume_message_id')).toBe(false);
+    client.disconnect();
+  });
+
+  it('an explicit connect can seed the run to resume, only with its thread', async () => {
+    const client = newReconnectClient();
+    let connecting = client.connect('agent', 'conn', 'tok', 'thr_1', undefined, 'run_seed');
+    expect(new URL(FakeWebSocket.last.url).searchParams.get('resume_run_id')).toBe('run_seed');
+    FakeWebSocket.last.fire('open', {});
+    await connecting;
+    connecting = client.connect('agent', 'conn', 'tok', undefined, undefined, 'run_seed');
+    expect(new URL(FakeWebSocket.last.url).searchParams.has('resume_run_id')).toBe(false);
+    FakeWebSocket.last.fire('open', {});
+    await connecting;
+    // Nor later, once a thread is known: an unscoped seed was never taken.
+    FakeWebSocket.last.frame({ type: 'thread_info', threadId: 'thr_new' });
+    expect((await reconnectUrl(client)).searchParams.has('resume_run_id')).toBe(false);
+    client.disconnect();
   });
 
   it('run_cancelled clears the in-flight id', async () => {
@@ -1219,6 +1259,39 @@ describe('runToCompletion', () => {
     const result = await outcome;
     expect(result).toMatchObject({ ok: true, result: { status: 'completed', text: 'done', reconnected: true } });
     expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    client.disconnect();
+  });
+
+  it('keeps waiting for the final text when the drop falls between the terminal run_state and it', async () => {
+    const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 0 });
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'Hel' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', usage: TOTALS });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('resume_run_id')).toBe('run_1');
+    // Longer than the settle window: it must not settle on the partial text meanwhile.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', usage: TOTALS });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'Hello, world' });
+    expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'Hello, world' } });
+    client.disconnect();
+  });
+
+  it('names a run adopted from run_state on every later reconnect', async () => {
+    // The first drop lost run_started; the reconnect's run_state names the run by its prompt.
+    const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 0 });
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    FakeWebSocket.last.frame({ type: 'message_received', requestId: 'req-1', threadId: 'thr_1', messageId: 'msg_u' });
+    await reconnectUrl(client);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', userMessageId: 'msg_u' });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('resume_run_id')).toBe('run_1');
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', userMessageId: 'msg_u' });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'done' });
+    expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'done' } });
     client.disconnect();
   });
 

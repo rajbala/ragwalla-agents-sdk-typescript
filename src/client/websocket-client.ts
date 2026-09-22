@@ -313,6 +313,9 @@ export class RagwallaWebSocket {
   // resume_run_id on reconnect: a drop before message_created leaves no message id, and a
   // run that finished while the client was away is otherwise never reported to it.
   private activeRunId: string | null = null;
+  // A run whose terminal run_state said `completed`: its final text follows as `resume`, so
+  // the ids stay until that arrives — a drop in between recovers the text on reconnect.
+  private runAwaitingFinalText: string | null = null;
   // Pending runToCompletion() waits. disconnect() removes the socket's handlers before
   // closing it, so no 'disconnected' event reaches them — it must end them directly.
   private runWaiters: Set<() => void> = new Set();
@@ -433,12 +436,14 @@ export class RagwallaWebSocket {
   /** The run ended: stop naming it on reconnect. A frame for a different run leaves it. */
   private endActiveRun(runId: string | undefined): void {
     if (runId === undefined || runId === this.activeRunId) this.activeRunId = null;
+    if (runId === undefined || runId === this.runAwaitingFinalText) this.runAwaitingFinalText = null;
   }
 
   private resetLogicalSession(threadId?: string): void {
     this.activeThreadId = threadId ?? null;
     this.activeMessageId = null;
     this.activeRunId = null;
+    this.runAwaitingFinalText = null;
   }
 
   private getStoredConnectionParams(): { agentId: string; connectionId: string } {
@@ -641,8 +646,17 @@ export class RagwallaWebSocket {
    * @param connectionId - Connection identifier (used for DO routing)
    * @param token - Authentication token
    * @param threadId - Optional Ragwalla thread ID. If provided, resumes that thread. If omitted, a new thread is created on first message.
+   * @param resumeMessageId - Optional in-flight message to resume (requires threadId).
+   * @param resumeRunId - Optional unfinished run to resume, from its `run_started` (requires threadId).
    */
-  async connect(agentId: string, connectionId: string, token: string, threadId?: string, resumeMessageId?: string): Promise<void> {
+  async connect(
+    agentId: string,
+    connectionId: string,
+    token: string,
+    threadId?: string,
+    resumeMessageId?: string,
+    resumeRunId?: string,
+  ): Promise<void> {
     this.invalidatePendingReconnects();
     this.cancelActiveConnect('WebSocket connection superseded');
     this.closeCurrentSocket();
@@ -653,6 +667,10 @@ export class RagwallaWebSocket {
     // carries resume_message_id and the server resumes instead of truncating the turn.
     if (resumeMessageId && threadId) {
       this.activeMessageId = resumeMessageId;
+    }
+    // The run id is the only handle when the drop came before message_created.
+    if (resumeRunId && threadId) {
+      this.activeRunId = resumeRunId;
     }
     this.isManuallyDisconnected = false;
     return this.connectInternal(agentId, connectionId, token, threadId);
@@ -1109,6 +1127,8 @@ export class RagwallaWebSocket {
           userMessageId !== undefined && frame.userMessageId === userMessageId
         ) {
           runId = frame.runId;
+          // ...and name it on any later reconnect, as run_started would have.
+          this.activeRunId = frame.runId;
         }
 
         if (!runId || frame.runId !== runId) return;
@@ -1176,6 +1196,13 @@ export class RagwallaWebSocket {
 
       const onDisconnected = (): void => {
         dropped = true;
+        // The run completed but its final text had not arrived. The reconnect names the run
+        // and repeats the terminal batch, text included; settling now would keep a partial one.
+        if (completedByRunState) {
+          completedByRunState = false;
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = null;
+        }
         // Sent, then lost before the worker acknowledged it in any way. Recovery adopts a run
         // by the prompt id message_received/run_started carried, and there is none: the
         // message may have started a run that can now be neither identified nor cancelled.
@@ -1485,11 +1512,15 @@ export class RagwallaWebSocket {
       case 'resume': {
         // Reconnect resume (§6a item 4): the worker's snapshot of the in-flight bubble's
         // current visible text. The consumer replaces the bubble body with `content`.
-        const resumeData = (message.data || message) as { messageId?: string; content?: string };
+        const resumeData = (message.data || message) as { runId?: string; messageId?: string; content?: string };
         emit('resume', {
           messageId: resumeData.messageId,
           content: resumeData.content
         });
+        if (resumeData.runId !== undefined && resumeData.runId === this.runAwaitingFinalText) {
+          this.activeMessageId = null;
+          this.endActiveRun(resumeData.runId);
+        }
         break;
       }
       case 'run_started': {
@@ -1502,6 +1533,7 @@ export class RagwallaWebSocket {
         }
         if (message.runId) {
           this.activeRunId = message.runId;
+          this.runAwaitingFinalText = null;
         }
         emit('runStarted', {
           threadId: message.threadId,
@@ -1523,8 +1555,13 @@ export class RagwallaWebSocket {
         // reconnect does not resume a finished message (§6a item 2). Uses the shared
         // terminal set so it cannot drift from the worker.
         if (isTerminalRunStatus(stateData.runStatus)) {
-          this.activeMessageId = null;
-          this.endActiveRun(stateData.runId);
+          if (stateData.runStatus === 'completed' && stateData.runId !== undefined) {
+            this.runAwaitingFinalText = stateData.runId;
+          } else {
+            // No `resume` follows any other terminal status.
+            this.activeMessageId = null;
+            this.endActiveRun(stateData.runId);
+          }
         }
         emit('runState', {
           runId: stateData.runId,

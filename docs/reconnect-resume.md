@@ -115,10 +115,12 @@ Under the hood, on every connection the SDK:
   drop during the *very first* streamed reply still carries `thread_id` on reconnect;
 - tracks the in-flight message id from `message_created` (and from `chunk` as a fallback if
   `message_created` was missed);
-- **clears** it on `complete`, `run_cancelled`, or a **terminal** `run_state`, so a later
-  reconnect never tries to resume a finished message;
-- tracks the run it started from `run_started.runId`, and clears it when that run ends
-  (the same three frames, for that run);
+- **clears** it once the run has ended **and** its final text has arrived: on `complete`,
+  `run_cancelled`, a terminal `run_state` other than `completed`, or — after a `completed`
+  `run_state` — that run's `resume`. A drop between a `completed` `run_state` and its
+  `resume` therefore still resumes the run and recovers the final text;
+- tracks the run it started from `run_started.runId` (or one it adopted from `run_state`), and
+  clears it on the same frames, for that run;
 - sends `resume_message_id` and `resume_run_id` **only** alongside `thread_id`.
 
 ### The order you'll observe on reconnect
@@ -199,11 +201,12 @@ To start a run, send a user message:
 
 - **in-flight `messageId`** — set it from `message_created.messageId`; fall back to
   `chunk.messageId` if you joined mid-stream and missed `message_created`. **Clear** it on
-  `complete`, on `run_cancelled`, and on any `run_state` whose `runStatus` is terminal.
+  `complete`, on `run_cancelled`, on a terminal `run_state` other than `completed`, and, after
+  a `completed` `run_state`, when that run's `resume` (its final text) arrives.
 - **`threadId`** — set it from `connected.currentThreadId` **and** from `thread_info.threadId`
   (plus whatever you connected with). You need it to reconnect.
-- **active `runId`** — set it from `run_started.runId`. **Clear** it on `complete`,
-  `run_cancelled`, or a terminal `run_state` for that run.
+- **active `runId`** — set it from `run_started.runId`. **Clear** it on the same frames as the
+  in-flight id, for that run.
 
 ### 4. Reconnecting
 
@@ -312,6 +315,7 @@ connect();
 - **Resume is a full snapshot** → on `resume`, replace the bubble text, then append chunks.
 - **`resume_message_id` requires `thread_id`** → never send it alone (it would be ignored).
 - **Reconnect order** → history → `run_state` → `message_created` → `resume` → live chunks.
-- **Clear the in-flight id** → on `complete`, `run_cancelled`, or a terminal `run_state`.
+- **Clear the in-flight id** → on `complete`, `run_cancelled`, a non-`completed` terminal
+  `run_state`, or the `resume` that follows a `completed` one.
 - **SDK** → listen for `resume` + `runState` (the single reconnect-status event);
   reconnect parameters are automatic.
