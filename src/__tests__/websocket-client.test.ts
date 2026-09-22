@@ -1274,6 +1274,57 @@ describe('runToCompletion', () => {
     expect(await second.outcome).toMatchObject({ ok: true, result: { runId: 'run_2' } });
   });
 
+  it('holds the socket: no other chat message can be sent while waiting, by any send path', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+
+    expect(() => client.sendMessage(PROMPT)).toThrow('rebind');
+    await expect(client.sendMessageAsync(PROMPT)).rejects.toThrow('rebind');
+    expect(() => client.send({ type: 'chat_message', content: 'x' })).toThrow('rebind');
+    await expect(client.sendAsync({ type: 'message', content: 'x' })).rejects.toThrow('rebind');
+    // Frames that do not start a run still pass.
+    client.send({ type: 'ping' });
+    expect(sentTypes(FakeWebSocket.last).map((f) => f.type)).toEqual(['message', 'ping']);
+
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    await outcome;
+    client.sendMessage(PROMPT);
+    expect(sentTypes(FakeWebSocket.last).map((f) => f.type)).toEqual(['message', 'ping', 'message']);
+  });
+
+  it('reattaches after a drop between message_received and run_started on a new thread', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client); // no thread yet: this message creates one
+    const { outcome } = await start(client);
+    FakeWebSocket.last.frame({ type: 'message_received', requestId: 'req-1', threadId: 'thr_new', messageId: 'msg_u' });
+
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('thread_id')).toBe('thr_new');
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', userMessageId: 'msg_u' });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    expect(await outcome).toMatchObject({ ok: true, result: { runId: 'run_1', threadId: 'thr_new' } });
+  });
+
+  it('sends nothing when aborted while waiting for the socket to reconnect', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    const before = FakeWebSocket.instances.length;
+    FakeWebSocket.last.fire('close', { code: 1006, reason: 'drop' });
+    await flushTimers(); // the auto-reconnect socket exists but has not opened
+    expect(FakeWebSocket.instances.length).toBe(before + 1);
+
+    const controller = new AbortController();
+    const { outcome } = await start(client, { signal: controller.signal });
+    controller.abort();
+    expect(await outcome).toMatchObject({ ok: false, error: { code: 'aborted' } });
+
+    FakeWebSocket.last.fire('open', {});
+    await flushTimers();
+    expect(FakeWebSocket.instances.flatMap((s) => s.sent)).toEqual([]);
+  });
+
   it('requires a requestId', async () => {
     const client = newClient();
     await connectOpen(client);

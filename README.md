@@ -548,9 +548,11 @@ try {
 
 It correlates through the native prompt/run correlation above — `requestId` →
 `run_started` → `runId` — so it ignores frames from other runs on the same socket.
-The server streams one run per socket (a new message rebinds the socket), so one
-`runToCompletion` may wait per connection at a time; a second concurrent call rejects.
-Use a separate connection per concurrent run.
+The server streams one run per socket (a new message rebinds the socket), so while
+`runToCompletion` waits it holds the connection: a second `runToCompletion` rejects, and
+`sendMessage`/`sendMessageAsync`/`send`/`sendAsync` refuse any chat message until it settles.
+Other frames (`cancelRun`, settings, ping) still pass. Use a separate connection per
+concurrent run.
 It resolves with `status: 'completed' | 'failed' | 'cancelled'` whenever the server
 reports an outcome, and rejects with `RunToCompletionError` only when it cannot observe
 one. On a timeout, an abort (`signal`), or a run-scoped `error`, it sends a `cancel_run`

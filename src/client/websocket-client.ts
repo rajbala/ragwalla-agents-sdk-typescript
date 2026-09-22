@@ -38,6 +38,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** A frame the worker treats as a new user message — one that starts a run and rebinds the socket. */
+function isChatMessageFrame(payload: unknown): boolean {
+  const type = (payload as { type?: unknown } | null)?.type;
+  return type === 'message' || type === 'chat_message';
+}
+
 function createWorkersSocket(url: string): UniversalWebSocket {
   const httpUrl = toWorkersFetchURL(url);
   const listeners: Record<string, Set<UniversalWebSocketListener>> = {
@@ -561,7 +567,24 @@ export class RagwallaWebSocket {
     };
   }
 
+  /**
+   * Every outbound frame passes here, so this is where a pending runToCompletion keeps the
+   * socket to itself: the worker binds a socket to ONE run and a new chat message rebinds it,
+   * which would starve the waiter of its terminal frame. Refusing only a second
+   * runToCompletion left sendMessage, sendMessageAsync, send, and sendAsync all able to do it.
+   * Non-message frames (cancel_run, settings, ping) do not rebind and still pass.
+   */
   private sendPayload(payload: any, context: any): void {
+    if (this.runWaiters.size > 0 && isChatMessageFrame(payload)) {
+      throw new Error(
+        'runToCompletion is waiting on this socket; sending another message would rebind the ' +
+        'socket to a new run. Use a separate connection, or wait for the run to finish.'
+      );
+    }
+    this.writePayload(payload, context);
+  }
+
+  private writePayload(payload: any, context: any): void {
     if (!this.ws || this.ws.readyState !== 1) { // 1 = OPEN
       this.log('error', 'Cannot send data - WebSocket not connected', {
         readyState: this.ws?.readyState,
@@ -1166,9 +1189,17 @@ export class RagwallaWebSocket {
         }, timeoutMs);
       }
 
-      this.sendMessageAsync(message, { requestId }).catch((error) => {
-        fail('request_failed', `Send failed: ${errorMessage(error)}`, { cancelRequested: false });
-      });
+      // The waiter's own message — the one send the guard in sendPayload exists to allow.
+      const payload = this.buildMessagePayload(message, { requestId });
+      this.ensureConnectedForSend()
+        .then(() => {
+          if (settled) return; // aborted or disconnected while reconnecting: send nothing
+          this.log('info', 'Sending WebSocket message', { payload });
+          this.writePayload(payload, message);
+        })
+        .catch((error) => {
+          fail('request_failed', `Send failed: ${errorMessage(error)}`, { cancelRequested: false });
+        });
     });
   }
 
@@ -1372,6 +1403,17 @@ export class RagwallaWebSocket {
       case 'run_paused':
         emit('runPaused', message.data || message);
         break;
+      case 'message_received': {
+        // The worker stored the message in this thread. Persisted for the same reason as
+        // run_started and thread_info: when the first message creates a thread and the socket
+        // drops before run_started, reconnecting without thread_id could not reattach to the
+        // run that message started. No normalized event, as before: rawMessage only.
+        if (message.threadId) {
+          this.activeThreadId = message.threadId;
+        }
+        emit('rawMessage', message);
+        break;
+      }
       case 'request_ack':
         emit('requestAck', message);
         emit('rawMessage', message);

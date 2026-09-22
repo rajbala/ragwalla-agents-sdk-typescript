@@ -813,7 +813,8 @@ export type KnownWebSocketMessageType =
   'thread_info' | 'thread_history' | 'typing' | 'tool_use' | 'token_usage' | 'error' |
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
-  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong';
+  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
+  'message_received';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
