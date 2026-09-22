@@ -1162,6 +1162,33 @@ describe('runToCompletion', () => {
     expect(FakeWebSocket.instances.flatMap((s) => s.sent.map((raw) => JSON.parse(raw).type))).toEqual(['message']);
   });
 
+  it('settles on the durable totals a terminal run_state reports after a reconnect', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    FakeWebSocket.last.frame({ type: 'token_usage', runId: 'run_1', call: {}, totals: { ...TOTALS, llmCallCount: 1 } });
+    await reconnectUrl(client);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', usage: TOTALS });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'done' });
+    const result = await outcome;
+    expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    client.disconnect();
+  });
+
+  it('treats an in-progress run_state\'s totals as the stream so far, not final', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    await reconnectUrl(client);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', usage: TOTALS });
+    FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
+    const result = await outcome;
+    expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'stream' });
+    client.disconnect();
+  });
+
   it('adopts the run from run_state when the drop lost run_started', async () => {
     const client = newReconnectClient();
     await connectOpen(client, { threadId: 'thr_1' });
@@ -1305,6 +1332,24 @@ describe('runToCompletion', () => {
     FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', userMessageId: 'msg_u' });
     FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1' });
     expect(await outcome).toMatchObject({ ok: true, result: { runId: 'run_1', threadId: 'thr_new' } });
+  });
+
+  it('rejects at once when the socket drops after sending and before any acknowledgement', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client, { threadId: 'thr_1' });
+    const { outcome } = await start(client);
+    expect(FakeWebSocket.last.sent).toHaveLength(1);
+    FakeWebSocket.last.fire('close', { code: 1006, reason: 'drop' });
+    const result = await outcome;
+    expect(result).toMatchObject({ ok: false, error: { code: 'connection_lost', details: { cancelRequested: false } } });
+    expect(result.ok || result.error.message).toContain('cannot be identified');
+    client.disconnect(); // stop the pending auto-reconnect from leaking into the next test
+  });
+
+  it('reports a failure to open the socket as connection_lost, not a server refusal', async () => {
+    const client = newClient(); // connect() never called: nothing to reconnect to
+    const { outcome } = await start(client);
+    expect(await outcome).toMatchObject({ ok: false, error: { code: 'connection_lost' } });
   });
 
   it('sends nothing when aborted while waiting for the socket to reconnect', async () => {

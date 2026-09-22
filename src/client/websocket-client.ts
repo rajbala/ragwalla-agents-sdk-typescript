@@ -202,7 +202,11 @@ export type RunToCompletionErrorCode =
   | 'request_failed'
   | 'timeout'
   | 'aborted'
-  /** The socket closed and will not reconnect; the run's outcome is unknown. */
+  /**
+   * The outcome cannot be observed over this connection: the socket could not be opened or
+   * written, closed and will not reconnect, or dropped before the server acknowledged the
+   * message (so the run, if one started, cannot be identified). Transport, not refusal.
+   */
   | 'connection_lost';
 
 /**
@@ -985,8 +989,10 @@ export class RagwallaWebSocket {
       // messageId -> text. A Map keeps first-appearance order when a resume replaces a value.
       const texts = new Map<string, string>();
       let streamTotals: RunUsageTotals | undefined;
+      let runStateTerminalUsage: RunUsageTotals | undefined;
       let dropped = false;
       let reconnected = false;
+      let written = false;
       let settled = false;
       let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
       let settleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1037,8 +1043,9 @@ export class RagwallaWebSocket {
       ): void => {
         if (settled || !runId) return;
         cleanup();
-        const usage = extra.usage
-          ? { ...extra.usage, source: 'terminal' as const }
+        const terminalUsage = extra.usage ?? runStateTerminalUsage;
+        const usage = terminalUsage
+          ? { ...terminalUsage, source: 'terminal' as const }
           : streamTotals
             ? { ...streamTotals, source: 'stream' as const }
             : undefined;
@@ -1132,6 +1139,13 @@ export class RagwallaWebSocket {
             finish('failed', { error: frame.error, usage: frame.usage });
             break;
           case 'run_state':
+            // The worker persists a run's totals before announcing each call, and reports them
+            // here — the one channel that reaches a client that was away when the live frames
+            // went out. Final once the run is terminal; the totals so far while it runs.
+            if (frame.usage) {
+              if (isTerminalRunStatus(frame.runStatus)) runStateTerminalUsage = frame.usage;
+              else streamTotals = frame.usage;
+            }
             if (frame.runStatus === 'completed') {
               completedByRunState = true;
               settleTimer = setTimeout(() => finish('completed'), RUN_STATE_SETTLE_MS);
@@ -1146,6 +1160,19 @@ export class RagwallaWebSocket {
 
       const onDisconnected = (): void => {
         dropped = true;
+        // Sent, then lost before the worker acknowledged it in any way. Recovery adopts a run
+        // by the prompt id message_received/run_started carried, and there is none: the
+        // message may have started a run that can now be neither identified nor cancelled.
+        // Say so now rather than wait on frames that no filter can ever accept.
+        if (written && runId === undefined && userMessageId === undefined) {
+          fail(
+            'connection_lost',
+            'The socket dropped before the server acknowledged the message; a run may have ' +
+            'started that cannot be identified',
+            { cancelRequested: false },
+          );
+          return;
+        }
         // The close handler schedules the reconnect synchronously after emitting this event.
         // If none was scheduled, none is coming and the outcome cannot be observed here.
         queueMicrotask(() => {
@@ -1196,9 +1223,12 @@ export class RagwallaWebSocket {
           if (settled) return; // aborted or disconnected while reconnecting: send nothing
           this.log('info', 'Sending WebSocket message', { payload });
           this.writePayload(payload, message);
+          written = true;
         })
         .catch((error) => {
-          fail('request_failed', `Send failed: ${errorMessage(error)}`, { cancelRequested: false });
+          // No server response was involved: the socket could not be (re)established or
+          // written. `request_failed` is reserved for a correlated refusal from the server.
+          fail('connection_lost', `Send failed: ${errorMessage(error)}`, { cancelRequested: false });
         });
     });
   }
@@ -1466,6 +1496,7 @@ export class RagwallaWebSocket {
           runStatus?: string;
           userMessageId?: string;
           activeTool?: unknown;
+          usage?: RunUsageTotals;
         };
         // A terminal run has no in-flight message to resume; clear the id so a later
         // reconnect does not resume a finished message (§6a item 2). Uses the shared
@@ -1477,6 +1508,7 @@ export class RagwallaWebSocket {
           runId: stateData.runId,
           runStatus: stateData.runStatus,
           ...(stateData.userMessageId !== undefined ? { userMessageId: stateData.userMessageId } : {}),
+          ...(stateData.usage !== undefined ? { usage: stateData.usage } : {}),
           activeTool: stateData.activeTool ?? null
         });
         break;
