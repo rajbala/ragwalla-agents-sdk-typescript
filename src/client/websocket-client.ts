@@ -623,6 +623,14 @@ export class RagwallaWebSocket {
       throw new Error('WebSocket is not connected');
     }
 
+    // A new message starts a new turn: the previous run's resume ids no longer name what a
+    // reconnect should recover. Left in place, a drop before this message's run_started
+    // resumed the old (possibly long-finished) run instead.
+    if (isChatMessageFrame(payload)) {
+      this.activeMessageId = null;
+      this.activeRunId = null;
+      this.runAwaitingFinalText = null;
+    }
     this.ws.send(JSON.stringify(payload));
   }
 
@@ -1090,7 +1098,10 @@ export class RagwallaWebSocket {
       ): void => {
         if (settled || !runId) return;
         cleanup();
-        const terminalUsage = extra.usage ?? runStateTerminalUsage;
+        // A run-scoped error held during its outcome window belongs to every outcome but
+        // success, whichever frame settles the run — its reason and any totals it carried.
+        const error = extra.error ?? (status !== 'completed' ? errored?.error : undefined);
+        const terminalUsage = extra.usage ?? runStateTerminalUsage ?? errored?.usage;
         const usage = terminalUsage
           ? { ...terminalUsage, source: 'terminal' as const }
           : streamTotals
@@ -1103,7 +1114,7 @@ export class RagwallaWebSocket {
           status,
           text: [...texts.values()].join(''),
           messageIds: [...texts.keys()].filter((id) => id !== ''),
-          ...(extra.error !== undefined && { error: extra.error }),
+          ...(error !== undefined && { error }),
           ...(extra.reason !== undefined && { reason: extra.reason }),
           ...(usage && { usage }),
           reconnected,
@@ -1176,8 +1187,7 @@ export class RagwallaWebSocket {
             });
             break;
           case 'run_cancelled':
-            // After a run-scoped error this is usually the cancel that error prompted; keep why.
-            finish('cancelled', errored ? { error: errored.error } : {});
+            finish('cancelled');
             break;
           case 'error':
             // Not every run-scoped error is terminal: assistant mode sends one when its stream
@@ -1187,7 +1197,7 @@ export class RagwallaWebSocket {
             if (errored) break;
             errored = { error: frame.error, ...(frame.usage !== undefined && { usage: frame.usage }) };
             requestCancel();
-            errorTimer = setTimeout(() => finish('failed', errored), ERROR_OUTCOME_SETTLE_MS);
+            errorTimer = setTimeout(() => finish('failed'), ERROR_OUTCOME_SETTLE_MS);
             break;
           case 'run_state':
             // The worker persists a run's totals before announcing each call, and reports them

@@ -739,6 +739,22 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     client.disconnect();
   });
 
+  it('a new message starts a new turn: the previous run is no longer named on reconnect', async () => {
+    // A completed run whose final text never came would otherwise stay named, and a drop
+    // before the NEW message's run_started would resume the old run instead.
+    const client = newReconnectClient();
+    await connectOpen(client, { threadId: 'thr_1' });
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'message_created', runId: 'run_1', messageId: 'msg_1' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
+    client.sendMessage({ role: 'user', content: 'next question' });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('thread_id')).toBe('thr_1');
+    expect(url.searchParams.has('resume_run_id')).toBe(false);
+    expect(url.searchParams.has('resume_message_id')).toBe(false);
+    client.disconnect();
+  });
+
   it('a terminal run_state that sends no final text clears the resume ids at once', async () => {
     const client = newReconnectClient();
     await connectOpen(client);
@@ -1216,13 +1232,26 @@ describe('runToCompletion', () => {
     });
   });
 
+  it('keeps the held error and its totals when a terminal run_state settles the run', async () => {
+    await withStartedRun(async (outcome) => {
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'model exploded', usage: TOTALS });
+      FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'failed', activeTool: null });
+      const result = await outcome;
+      expect(result).toMatchObject({ ok: true, result: { status: 'failed', error: 'model exploded', reason: 'failed' } });
+      expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    });
+  });
+
   it('reports completed when the run finished before the cancel landed', async () => {
     await withStartedRun(async (outcome) => {
       FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'all done' });
       FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'stream ended early' });
       FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'and again' });
       FakeWebSocket.last.frame({ type: 'complete', runId: 'run_1', messageId: 'msg_a' });
-      expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'all done' } });
+      const result = await outcome;
+      expect(result).toMatchObject({ ok: true, result: { status: 'completed', text: 'all done' } });
+      // It completed, so the earlier stream error is not reported as its outcome.
+      expect(result.ok && result.result.error).toBeUndefined();
       // One cancel only: a repeated error neither re-cancels nor restarts the wait.
       expect(sentTypes(FakeWebSocket.last).filter((f) => f.type === 'cancel_run')).toHaveLength(1);
     });

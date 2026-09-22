@@ -121,6 +121,8 @@ Under the hood, on every connection the SDK:
   `resume` therefore still resumes the run and recovers the final text;
 - tracks the run it started from `run_started.runId` (or one it adopted from `run_state`), and
   clears it on the same frames, for that run;
+- clears both when it sends a new message: a new turn begins, and the previous run is no
+  longer what a reconnect should recover;
 - sends `resume_message_id` and `resume_run_id` **only** alongside `thread_id`.
 
 ### The order you'll observe on reconnect
@@ -207,6 +209,8 @@ To start a run, send a user message:
   (plus whatever you connected with). You need it to reconnect.
 - **active `runId`** — set it from `run_started.runId`. **Clear** it on the same frames as the
   in-flight id, for that run.
+- **Clear both when you send a new message** — a new turn begins, and naming the previous run
+  on a reconnect before the new `run_started` would recover the old run instead.
 
 ### 4. Reconnecting
 
