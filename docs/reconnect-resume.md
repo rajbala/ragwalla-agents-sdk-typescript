@@ -270,12 +270,15 @@ const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'incomplete', 'exp
 
 let threadId = KNOWN_THREAD_ID ?? null;   // null for a brand-new thread
 let inflightId = null;
+let runId = null;          // the run to name on reconnect: from run_started, or a reconnect's run_state
+let awaitingFinal = null;  // a run whose `completed` run_state arrived before its final `resume`
 let bubble = { id: null, text: '' };
 
 function url() {
   const p = new URLSearchParams({ token: TOKEN, continuation_mode: 'auto' });
   if (threadId) p.set('thread_id', threadId);
   if (inflightId && threadId) p.set('resume_message_id', inflightId); // never without thread_id
+  if (runId && threadId) p.set('resume_run_id', runId);                // likewise
   return `wss://${SUB}.ai.ragwalla.com/v1/agents/${AGENT}/main?${p}`;
 }
 
@@ -287,20 +290,31 @@ function connect() {
     switch (m.type) {
       case 'connected':       if (m.currentThreadId) threadId = m.currentThreadId; break;
       case 'thread_info':     if (m.threadId) threadId = m.threadId; break;
+      case 'run_started':     runId = m.runId; awaitingFinal = null; if (m.threadId) threadId = m.threadId; break;
       case 'thread_history':  renderHistory(m.messages); break;
       case 'message_created': inflightId = m.messageId; bubble = { id: m.messageId, text: '' }; break;
       case 'chunk':
         inflightId = m.messageId;
         if (m.messageId === bubble.id) { bubble.text += m.content; render(bubble); }
         break;
-      case 'resume':          bubble = { id: m.messageId, text: m.content }; render(bubble); break; // REPLACE
-      case 'run_state':       if (TERMINAL.has(m.runStatus)) inflightId = null; break;
-      case 'complete':        inflightId = null; break;
-      case 'run_cancelled':   inflightId = null; break;
+      case 'resume':
+        bubble = { id: m.messageId, text: m.content }; render(bubble); // REPLACE
+        if (m.runId === awaitingFinal) { inflightId = null; runId = null; awaitingFinal = null; }
+        break;
+      case 'run_state':
+        if (!TERMINAL.has(m.runStatus) || m.runStatus === 'completed') {
+          runId = runId ?? m.runId;                                 // adopt it if following none
+          if (m.runStatus === 'completed') awaitingFinal = m.runId; // keep ids until its resume
+        } else {
+          inflightId = null; runId = null;                          // no resume follows
+        }
+        break;
+      case 'complete':
+      case 'run_cancelled':   inflightId = null; runId = null; awaitingFinal = null; break;
     }
   };
 
-  // Reconnect on an unclean close. url() automatically carries thread_id + resume_message_id.
+  // Reconnect on an unclean close. url() carries thread_id and the resume ids it holds.
   ws.onclose = (ev) => { if (!ev.wasClean) setTimeout(connect, 1000); };
   return ws;
 }

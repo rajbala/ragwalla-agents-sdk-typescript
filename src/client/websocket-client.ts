@@ -1127,8 +1127,6 @@ export class RagwallaWebSocket {
           userMessageId !== undefined && frame.userMessageId === userMessageId
         ) {
           runId = frame.runId;
-          // ...and name it on any later reconnect, as run_started would have.
-          this.activeRunId = frame.runId;
         }
 
         if (!runId || frame.runId !== runId) return;
@@ -1551,17 +1549,18 @@ export class RagwallaWebSocket {
           activeTool?: unknown;
           usage?: RunUsageTotals;
         };
-        // A terminal run has no in-flight message to resume; clear the id so a later
-        // reconnect does not resume a finished message (§6a item 2). Uses the shared
+        // A client following no run adopts the one this reconnect resolved, so a second drop
+        // before message_created still names it; one already following its own run keeps it.
+        // A completed run keeps its ids until its final `resume`; no `resume` follows any
+        // other terminal status, so those clear at once (§6a item 2). Uses the shared
         // terminal set so it cannot drift from the worker.
-        if (isTerminalRunStatus(stateData.runStatus)) {
-          if (stateData.runStatus === 'completed' && stateData.runId !== undefined) {
-            this.runAwaitingFinalText = stateData.runId;
-          } else {
-            // No `resume` follows any other terminal status.
-            this.activeMessageId = null;
-            this.endActiveRun(stateData.runId);
-          }
+        const terminal = isTerminalRunStatus(stateData.runStatus);
+        if (stateData.runId !== undefined && (!terminal || stateData.runStatus === 'completed')) {
+          if (this.activeRunId === null) this.activeRunId = stateData.runId;
+          if (terminal) this.runAwaitingFinalText = stateData.runId;
+        } else if (terminal) {
+          this.activeMessageId = null;
+          this.endActiveRun(stateData.runId);
         }
         emit('runState', {
           runId: stateData.runId,

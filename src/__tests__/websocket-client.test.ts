@@ -722,6 +722,23 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     client.disconnect();
   });
 
+  it('follows the run a reconnect resolves, without runToCompletion', async () => {
+    // An ordinary consumer that never saw run_started: the reconnect's run_state is its only
+    // handle on the run, and a second drop must still name it.
+    const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 0 });
+    await connectOpen(client, { threadId: 'thr_1' });
+    await reconnectUrl(client);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', activeTool: null });
+    expect((await reconnectUrl(client)).searchParams.get('resume_run_id')).toBe('run_1');
+    // It completed while the client was away again: still named until its final text arrives.
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
+    expect((await reconnectUrl(client)).searchParams.get('resume_run_id')).toBe('run_1');
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_1', content: 'done' });
+    expect((await reconnectUrl(client)).searchParams.has('resume_run_id')).toBe(false);
+    client.disconnect();
+  });
+
   it('a terminal run_state that sends no final text clears the resume ids at once', async () => {
     const client = newReconnectClient();
     await connectOpen(client);
