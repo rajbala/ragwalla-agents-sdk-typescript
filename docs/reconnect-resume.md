@@ -53,8 +53,8 @@ const ws = ragwalla.createWebSocket({
 await ws.connect(agent.id, 'main', token, threadId);
 ```
 
-Reconnection is **automatic**. On a drop, the SDK reconnects and **re-sends `thread_id` and
-`resume_message_id` for you** — you never build those yourself.
+Reconnection is **automatic**. On a drop, the SDK reconnects and **re-sends `thread_id`,
+`resume_message_id` and `resume_run_id` for you** — you never build those yourself.
 
 If you are writing a proxy, keep the browser data plane raw:
 
@@ -117,7 +117,9 @@ Under the hood, on every connection the SDK:
   `message_created` was missed);
 - **clears** it on `complete`, `run_cancelled`, or a **terminal** `run_state`, so a later
   reconnect never tries to resume a finished message;
-- sends `resume_message_id` **only** alongside `thread_id`.
+- tracks the run it started from `run_started.runId`, and clears it when that run ends
+  (the same three frames, for that run);
+- sends `resume_message_id` and `resume_run_id` **only** alongside `thread_id`.
 
 ### The order you'll observe on reconnect
 
@@ -153,12 +155,16 @@ wss://<subdomain>.ai.ragwalla.com/v1/agents/<agentId>/<connectionId>
     &continuation_mode=auto
     [&thread_id=<threadId>]
     [&resume_message_id=<messageId>]
+    [&resume_run_id=<runId>]
 ```
 
 - `connectionId` — any stable per-connection identifier (e.g. `main`).
 - `thread_id` — include to attach to an existing thread (**required** for resume).
 - `resume_message_id` — include **only** on a reconnect where you hold an in-flight message
   id (see §4).
+- `resume_run_id` — include on a reconnect while a run you started has not ended (see §4).
+  It is how you learn the outcome of a run that finished while you were away when you never
+  received `message_created`, so hold no message id.
 
 The server authenticates the connection and derives the project/agent context from `token`;
 you do not send auth headers from a browser.
@@ -196,16 +202,21 @@ To start a run, send a user message:
   `complete`, on `run_cancelled`, and on any `run_state` whose `runStatus` is terminal.
 - **`threadId`** — set it from `connected.currentThreadId` **and** from `thread_info.threadId`
   (plus whatever you connected with). You need it to reconnect.
+- **active `runId`** — set it from `run_started.runId`. **Clear** it on `complete`,
+  `run_cancelled`, or a terminal `run_state` for that run.
 
 ### 4. Reconnecting
 
 On an unexpected close, reconnect to the same URL and:
 
 - **always** include `thread_id` (the thread you were on);
-- include `resume_message_id` **only if** you currently hold an in-flight message id.
+- include `resume_message_id` **only if** you currently hold an in-flight message id;
+- include `resume_run_id` if you hold an active run id. When no run is active, the server
+  resolves that run's terminal `run_state` (with `usage`) and `resume`, and prefers it over
+  `resume_message_id`, which may name a prior run.
 
-> **Invariant — never send `resume_message_id` without `thread_id`.** The server's resume
-> lookup is thread-scoped; an unscoped `resume_message_id` is silently ignored and you get no
+> **Invariant — never send `resume_message_id` or `resume_run_id` without `thread_id`.** The
+> server's resume lookup is thread-scoped; an unscoped id is silently ignored and you get no
 > resume. If you don't yet know the thread, reconnect with `thread_id` only and rely on
 > `thread_history` + the server recovering the active run by id (see §7).
 

@@ -962,6 +962,49 @@ describe('terminal and usage frames', () => {
     client.disconnect();
   });
 
+  it('names the started run on reconnect (resume_run_id), even with no message id yet', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_new', userMessageId: 'msg_u', runId: 'run_1' });
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('thread_id')).toBe('thr_new');
+    expect(url.searchParams.get('resume_run_id')).toBe('run_1');
+    expect(url.searchParams.has('resume_message_id')).toBe(false);
+    client.disconnect();
+  });
+
+  it.each([
+    ['complete', { type: 'complete', runId: 'run_1', messageId: 'msg_a' }],
+    ['run_cancelled', { type: 'run_cancelled', runId: 'run_1' }],
+    ['a terminal run_state', { type: 'run_state', runId: 'run_1', runStatus: 'failed', activeTool: null }],
+  ])('stops naming the run once %s ends it', async (_case, ending) => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame(ending);
+    expect((await reconnectUrl(client)).searchParams.has('resume_run_id')).toBe(false);
+    client.disconnect();
+  });
+
+  it('keeps naming its run when a different run ends', async () => {
+    const client = newReconnectClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_1', userMessageId: 'msg_u', runId: 'run_1' });
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_other', runStatus: 'completed', activeTool: null });
+    expect((await reconnectUrl(client)).searchParams.get('resume_run_id')).toBe('run_1');
+    client.disconnect();
+  });
+
+  it('public connect to a new session does not name the old run', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    FakeWebSocket.last.frame({ type: 'run_started', threadId: 'thr_old', userMessageId: 'msg_u', runId: 'run_old' });
+    const connectPromise = client.connect('agent_b', 'conn_b', 'tok_b', 'thr_new');
+    expect(new URL(FakeWebSocket.last.url).searchParams.has('resume_run_id')).toBe(false);
+    FakeWebSocket.last.fire('open', {});
+    await connectPromise;
+  });
+
   it('run_started persists its thread so a reconnect during the first reply reattaches', async () => {
     const client = newReconnectClient();
     await connectOpen(client);
@@ -1160,6 +1203,23 @@ describe('runToCompletion', () => {
     });
     // Never resent: the first socket carried the only message frame, the second none.
     expect(FakeWebSocket.instances.flatMap((s) => s.sent.map((raw) => JSON.parse(raw).type))).toEqual(['message']);
+  });
+
+  it('learns the outcome of a run that finished while it was away, before any message arrived', async () => {
+    // Dropped after run_started, before message_created: the only name for the run is its id.
+    const client = newReconnectClient();
+    await connectOpen(client);
+    const { outcome } = await start(client);
+    started(FakeWebSocket.last);
+    const url = await reconnectUrl(client);
+    expect(url.searchParams.get('resume_run_id')).toBe('run_1');
+    expect(url.searchParams.has('resume_message_id')).toBe(false);
+    FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', usage: TOTALS });
+    FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'done' });
+    const result = await outcome;
+    expect(result).toMatchObject({ ok: true, result: { status: 'completed', text: 'done', reconnected: true } });
+    expect(result.ok && result.result.usage).toEqual({ ...TOTALS, source: 'terminal' });
+    client.disconnect();
   });
 
   it('settles on the durable totals a terminal run_state reports after a reconnect', async () => {

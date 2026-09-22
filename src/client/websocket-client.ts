@@ -269,6 +269,7 @@ export interface WebSocketReconnectContext {
   connectionId: string;
   threadId?: string;
   resumeMessageId?: string;
+  resumeRunId?: string;
   previousToken?: string;
   attempt: number;
   reason: WebSocketReconnectReason;
@@ -308,6 +309,10 @@ export class RagwallaWebSocket {
   // The in-flight assistant message id (the bubble currently streaming). Sent as
   // resume_message_id on reconnect so the worker resumes the right message (§6a).
   private activeMessageId: string | null = null;
+  // The run this client started and has not yet seen end (from run_started). Sent as
+  // resume_run_id on reconnect: a drop before message_created leaves no message id, and a
+  // run that finished while the client was away is otherwise never reported to it.
+  private activeRunId: string | null = null;
   // Pending runToCompletion() waits. disconnect() removes the socket's handlers before
   // closing it, so no 'disconnected' event reaches them — it must end them directly.
   private runWaiters: Set<() => void> = new Set();
@@ -425,9 +430,15 @@ export class RagwallaWebSocket {
     return null;
   }
 
+  /** The run ended: stop naming it on reconnect. A frame for a different run leaves it. */
+  private endActiveRun(runId: string | undefined): void {
+    if (runId === undefined || runId === this.activeRunId) this.activeRunId = null;
+  }
+
   private resetLogicalSession(threadId?: string): void {
     this.activeThreadId = threadId ?? null;
     this.activeMessageId = null;
+    this.activeRunId = null;
   }
 
   private getStoredConnectionParams(): { agentId: string; connectionId: string } {
@@ -450,6 +461,7 @@ export class RagwallaWebSocket {
         connectionId,
         threadId: this.activeThreadId ?? undefined,
         resumeMessageId: this.activeMessageId ?? undefined,
+        resumeRunId: this.activeRunId ?? undefined,
         previousToken,
         attempt: this.currentAttempts,
         reason,
@@ -677,6 +689,10 @@ export class RagwallaWebSocket {
     // connect(), which on the auto-reconnect path would strand the client with no retry.
     if (this.activeMessageId && effectiveThreadId) {
       params.set('resume_message_id', this.activeMessageId);
+    }
+    // Same thread gate. The worker prefers the run over the message id, which may be stale.
+    if (this.activeRunId && effectiveThreadId) {
+      params.set('resume_run_id', this.activeRunId);
     }
     const url = `${this.baseURL}/agents/${agentId}/${connectionId}?${params.toString()}`;
     
@@ -1319,6 +1335,7 @@ export class RagwallaWebSocket {
       case 'complete': {
         // Message completion event — the in-flight message is done.
         this.activeMessageId = null;
+        this.endActiveRun(message.runId);
         // The worker sends the outcome on this frame: `failed`/`cancelled` (neither means
         // completed), `reason`, `error`, and the stamped `runId`. Only `messageId` used to be
         // forwarded, so a failed or cancelled run was indistinguishable from a successful one.
@@ -1462,6 +1479,7 @@ export class RagwallaWebSocket {
         // Turn ended without a 'complete' — drop the in-flight id so the next reconnect
         // does not try to resume a finished message (§6a item 2).
         this.activeMessageId = null;
+        this.endActiveRun((message.data || message).runId);
         emit('runCancelled', message.data || message);
         break;
       case 'resume': {
@@ -1481,6 +1499,9 @@ export class RagwallaWebSocket {
         // the worker could not reattach this socket to the run it just started.
         if (message.threadId) {
           this.activeThreadId = message.threadId;
+        }
+        if (message.runId) {
+          this.activeRunId = message.runId;
         }
         emit('runStarted', {
           threadId: message.threadId,
@@ -1503,6 +1524,7 @@ export class RagwallaWebSocket {
         // terminal set so it cannot drift from the worker.
         if (isTerminalRunStatus(stateData.runStatus)) {
           this.activeMessageId = null;
+          this.endActiveRun(stateData.runId);
         }
         emit('runState', {
           runId: stateData.runId,
