@@ -1313,6 +1313,45 @@ describe('runToCompletion', () => {
     }
   });
 
+  it('keeps waiting, and asks again, when a reconnect shows the errored run still executing', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    try {
+      const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 10_000 });
+      const connecting = client.connect('agent', 'conn', 'tok');
+      FakeWebSocket.last.fire('open', {});
+      await connecting;
+      const { outcome } = await start(client);
+      started(FakeWebSocket.last);
+      let done = false;
+      void outcome.then(() => { done = true; });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'stream ended early' });
+      FakeWebSocket.last.fire('close', { code: 1006, reason: 'network drop' }); // the cancel may be lost
+      jest.advanceTimersByTime(10_300);
+      await flushAsyncUpgrade();
+      FakeWebSocket.last.fire('open', {});
+      await flushMicrotasks();
+      FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'in_progress', activeTool: null });
+      expect(sentTypes(FakeWebSocket.last)).toContainEqual({ type: 'cancel_run', runId: 'run_1' });
+      jest.advanceTimersByTime(5_000); // past the window, still connected
+      await flushMicrotasks();
+      expect(done).toBe(false);
+      // A second drop and a reconnect that brings nothing must not restart the window either.
+      FakeWebSocket.last.fire('close', { code: 1006, reason: 'network drop' });
+      jest.advanceTimersByTime(10_300);
+      await flushAsyncUpgrade();
+      FakeWebSocket.last.fire('open', {});
+      await flushMicrotasks();
+      jest.advanceTimersByTime(30_000); // far past the window: the run is known to be alive
+      await flushMicrotasks();
+      expect(done).toBe(false);
+      FakeWebSocket.last.frame({ type: 'run_cancelled', runId: 'run_1' });
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'cancelled', error: 'stream ended early' } });
+      client.disconnect();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reports completed when the run finished before the cancel landed', async () => {
     await withStartedRun(async (outcome) => {
       FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'all done' });

@@ -1058,6 +1058,9 @@ export class RagwallaWebSocket {
       // A run-scoped error, held until the run's outcome is known (ERROR_OUTCOME_SETTLE_MS).
       let errored: { error: unknown; usage?: RunUsageTotals } | undefined;
       let errorTimer: ReturnType<typeof setTimeout> | null = null;
+      // The server confirmed the errored run still executing: the window's premise (the error
+      // ended the run) is gone, so only the run's outcome or timeoutMs ends the wait.
+      let erroredRunAlive = false;
 
       const cleanup = (): void => {
         settled = true;
@@ -1214,6 +1217,14 @@ export class RagwallaWebSocket {
               if (isTerminalRunStatus(frame.runStatus)) runStateTerminalUsage = frame.usage;
               else streamTotals = frame.usage;
             }
+            if (errored && !isTerminalRunStatus(frame.runStatus)) {
+              // Alive after its error, so the cancel may have been lost with a socket. Ask
+              // again, and wait for how it ends rather than settling on the window.
+              erroredRunAlive = true;
+              if (errorTimer) clearTimeout(errorTimer);
+              errorTimer = null;
+              requestCancel();
+            }
             if (frame.runStatus === 'completed') {
               completedByRunState = true;
               settleTimer = setTimeout(() => finish('completed'), RUN_STATE_SETTLE_MS);
@@ -1264,7 +1275,7 @@ export class RagwallaWebSocket {
       };
       const onConnected = (): void => {
         if (dropped) reconnected = true;
-        if (errored && !errorTimer) {
+        if (errored && !erroredRunAlive && !errorTimer) {
           errorTimer = setTimeout(() => finish('failed'), ERROR_OUTCOME_SETTLE_MS);
         }
       };
