@@ -561,7 +561,7 @@ reports an outcome, and rejects with `RunToCompletionError` only when it cannot 
 one. On a timeout, an abort (`signal`), or a run-scoped `error`, it sends a `cancel_run`
 naming the run so an abandoned wait does not leave the run executing. A run-scoped `error`
 is not always terminal (assistant mode sends one while the run may still execute), so after
-one it waits up to 3 seconds for the run's actual outcome — `cancelled` if the cancel lands,
+one it waits up to 3 seconds of connected time for the run's actual outcome — `cancelled` if the cancel lands,
 or whatever `complete` reports — and otherwise settles as `failed`. It never resends
 the message: after a dropped socket the client reconnects to the thread and the server
 resumes the in-flight message.

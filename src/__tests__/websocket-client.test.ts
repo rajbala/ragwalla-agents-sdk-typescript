@@ -1253,6 +1253,66 @@ describe('runToCompletion', () => {
     });
   });
 
+  it('pauses the error window while the socket is down, and learns the outcome on reconnect', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    try {
+      // A reconnect slower than the window: 10s backoff (plus up to 250ms jitter).
+      const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 10_000 });
+      const connecting = client.connect('agent', 'conn', 'tok');
+      FakeWebSocket.last.fire('open', {});
+      await connecting;
+      const { outcome } = await start(client);
+      started(FakeWebSocket.last);
+      let done = false;
+      void outcome.then(() => { done = true; });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'stream ended early' });
+      const before = FakeWebSocket.instances.length;
+      FakeWebSocket.last.fire('close', { code: 1006, reason: 'network drop' });
+      jest.advanceTimersByTime(5_000);
+      await flushMicrotasks();
+      expect(done).toBe(false); // the window did not run while disconnected
+      jest.advanceTimersByTime(5_300);
+      await flushAsyncUpgrade(); // setImmediate is not faked: lets the reconnect's async steps run
+      expect(FakeWebSocket.instances.length).toBe(before + 1);
+      FakeWebSocket.last.fire('open', {});
+      await flushMicrotasks();
+      FakeWebSocket.last.frame({ type: 'run_state', runId: 'run_1', runStatus: 'completed', activeTool: null });
+      FakeWebSocket.last.frame({ type: 'resume', runId: 'run_1', messageId: 'msg_a', content: 'done' });
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'completed', text: 'done', reconnected: true } });
+      client.disconnect();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('restarts the error window on reconnect, so a silent reconnect still settles', async () => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick', 'setImmediate'] });
+    try {
+      const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 3, reconnectDelay: 10_000 });
+      const connecting = client.connect('agent', 'conn', 'tok');
+      FakeWebSocket.last.fire('open', {});
+      await connecting;
+      const { outcome } = await start(client);
+      started(FakeWebSocket.last);
+      let done = false;
+      void outcome.then(() => { done = true; });
+      FakeWebSocket.last.frame({ type: 'error', runId: 'run_1', error: 'boom' });
+      FakeWebSocket.last.fire('close', { code: 1006, reason: 'network drop' });
+      jest.advanceTimersByTime(10_300);
+      await flushAsyncUpgrade();
+      FakeWebSocket.last.fire('open', {});
+      await flushMicrotasks();
+      jest.advanceTimersByTime(2_999);
+      await flushMicrotasks();
+      expect(done).toBe(false);
+      jest.advanceTimersByTime(1);
+      expect(await outcome).toMatchObject({ ok: true, result: { status: 'failed', error: 'boom' } });
+      client.disconnect();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reports completed when the run finished before the cancel landed', async () => {
     await withStartedRun(async (outcome) => {
       FakeWebSocket.last.frame({ type: 'chunk', runId: 'run_1', messageId: 'msg_a', content: 'all done' });

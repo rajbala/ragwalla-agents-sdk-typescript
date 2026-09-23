@@ -1235,6 +1235,12 @@ export class RagwallaWebSocket {
           if (settleTimer) clearTimeout(settleTimer);
           settleTimer = null;
         }
+        // Likewise the window after a run-scoped error runs only while connected: the outcome
+        // it waits for arrives on the reconnect, which can take longer than the window.
+        if (errorTimer) {
+          clearTimeout(errorTimer);
+          errorTimer = null;
+        }
         // Sent, then lost before the worker acknowledged it in any way. Recovery adopts a run
         // by the prompt id message_received/run_started carried, and there is none: the
         // message may have started a run that can now be neither identified nor cancelled.
@@ -1258,6 +1264,9 @@ export class RagwallaWebSocket {
       };
       const onConnected = (): void => {
         if (dropped) reconnected = true;
+        if (errored && !errorTimer) {
+          errorTimer = setTimeout(() => finish('failed'), ERROR_OUTCOME_SETTLE_MS);
+        }
       };
       const onReconnectFailed = (): void => {
         fail('connection_lost', 'The socket closed and reconnection failed', { cancelRequested: false });
