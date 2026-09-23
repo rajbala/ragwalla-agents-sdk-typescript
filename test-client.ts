@@ -190,7 +190,7 @@ class AgentTestClient {
 
       this.log('success', 'WebSocket token generated successfully', {
         tokenLength: tokenResponse.token.length,
-        expiresAt: tokenResponse.expires_at
+        expiresAt: tokenResponse.expiresAt
       });
 
       // Store token for later tests

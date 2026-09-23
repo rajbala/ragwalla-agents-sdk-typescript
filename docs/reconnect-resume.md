@@ -53,8 +53,8 @@ const ws = ragwalla.createWebSocket({
 await ws.connect(agent.id, 'main', token, threadId);
 ```
 
-Reconnection is **automatic**. On a drop, the SDK reconnects and **re-sends `thread_id` and
-`resume_message_id` for you** — you never build those yourself.
+Reconnection is **automatic**. On a drop, the SDK reconnects and **re-sends `thread_id`,
+`resume_message_id` and `resume_run_id` for you** — you never build those yourself.
 
 If you are writing a proxy, keep the browser data plane raw:
 
@@ -115,9 +115,15 @@ Under the hood, on every connection the SDK:
   drop during the *very first* streamed reply still carries `thread_id` on reconnect;
 - tracks the in-flight message id from `message_created` (and from `chunk` as a fallback if
   `message_created` was missed);
-- **clears** it on `complete`, `run_cancelled`, or a **terminal** `run_state`, so a later
-  reconnect never tries to resume a finished message;
-- sends `resume_message_id` **only** alongside `thread_id`.
+- **clears** it once the run has ended **and** its final text has arrived: on `complete`,
+  `run_cancelled`, a terminal `run_state` other than `completed`, or — after a `completed`
+  `run_state` — that run's `resume`. A drop between a `completed` `run_state` and its
+  `resume` therefore still resumes the run and recovers the final text;
+- tracks the run it started from `run_started.runId` (or one it adopted from `run_state`), and
+  clears it on the same frames, for that run;
+- clears both when it sends a new message: a new turn begins, and the previous run is no
+  longer what a reconnect should recover;
+- sends `resume_message_id` and `resume_run_id` **only** alongside `thread_id`.
 
 ### The order you'll observe on reconnect
 
@@ -153,12 +159,16 @@ wss://<subdomain>.ai.ragwalla.com/v1/agents/<agentId>/<connectionId>
     &continuation_mode=auto
     [&thread_id=<threadId>]
     [&resume_message_id=<messageId>]
+    [&resume_run_id=<runId>]
 ```
 
 - `connectionId` — any stable per-connection identifier (e.g. `main`).
 - `thread_id` — include to attach to an existing thread (**required** for resume).
 - `resume_message_id` — include **only** on a reconnect where you hold an in-flight message
   id (see §4).
+- `resume_run_id` — include on a reconnect while a run you started has not ended (see §4).
+  It is how you learn the outcome of a run that finished while you were away when you never
+  received `message_created`, so hold no message id.
 
 The server authenticates the connection and derives the project/agent context from `token`;
 you do not send auth headers from a browser.
@@ -193,19 +203,27 @@ To start a run, send a user message:
 
 - **in-flight `messageId`** — set it from `message_created.messageId`; fall back to
   `chunk.messageId` if you joined mid-stream and missed `message_created`. **Clear** it on
-  `complete`, on `run_cancelled`, and on any `run_state` whose `runStatus` is terminal.
+  `complete`, on `run_cancelled`, on a terminal `run_state` other than `completed`, and, after
+  a `completed` `run_state`, when that run's `resume` (its final text) arrives.
 - **`threadId`** — set it from `connected.currentThreadId` **and** from `thread_info.threadId`
   (plus whatever you connected with). You need it to reconnect.
+- **active `runId`** — set it from `run_started.runId`. **Clear** it on the same frames as the
+  in-flight id, for that run.
+- **Clear both when you send a new message** — a new turn begins, and naming the previous run
+  on a reconnect before the new `run_started` would recover the old run instead.
 
 ### 4. Reconnecting
 
 On an unexpected close, reconnect to the same URL and:
 
 - **always** include `thread_id` (the thread you were on);
-- include `resume_message_id` **only if** you currently hold an in-flight message id.
+- include `resume_message_id` **only if** you currently hold an in-flight message id;
+- include `resume_run_id` if you hold an active run id. When no run is active, the server
+  resolves that run's terminal `run_state` (with `usage`) and `resume`, and prefers it over
+  `resume_message_id`, which may name a prior run.
 
-> **Invariant — never send `resume_message_id` without `thread_id`.** The server's resume
-> lookup is thread-scoped; an unscoped `resume_message_id` is silently ignored and you get no
+> **Invariant — never send `resume_message_id` or `resume_run_id` without `thread_id`.** The
+> server's resume lookup is thread-scoped; an unscoped id is silently ignored and you get no
 > resume. If you don't yet know the thread, reconnect with `thread_id` only and rely on
 > `thread_history` + the server recovering the active run by id (see §7).
 
@@ -256,12 +274,15 @@ const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'incomplete', 'exp
 
 let threadId = KNOWN_THREAD_ID ?? null;   // null for a brand-new thread
 let inflightId = null;
+let runId = null;          // the run to name on reconnect: from run_started, or a reconnect's run_state
+let awaitingFinal = null;  // a run whose `completed` run_state arrived before its final `resume`
 let bubble = { id: null, text: '' };
 
 function url() {
   const p = new URLSearchParams({ token: TOKEN, continuation_mode: 'auto' });
   if (threadId) p.set('thread_id', threadId);
   if (inflightId && threadId) p.set('resume_message_id', inflightId); // never without thread_id
+  if (runId && threadId) p.set('resume_run_id', runId);                // likewise
   return `wss://${SUB}.ai.ragwalla.com/v1/agents/${AGENT}/main?${p}`;
 }
 
@@ -273,20 +294,31 @@ function connect() {
     switch (m.type) {
       case 'connected':       if (m.currentThreadId) threadId = m.currentThreadId; break;
       case 'thread_info':     if (m.threadId) threadId = m.threadId; break;
+      case 'run_started':     runId = m.runId; awaitingFinal = null; if (m.threadId) threadId = m.threadId; break;
       case 'thread_history':  renderHistory(m.messages); break;
       case 'message_created': inflightId = m.messageId; bubble = { id: m.messageId, text: '' }; break;
       case 'chunk':
         inflightId = m.messageId;
         if (m.messageId === bubble.id) { bubble.text += m.content; render(bubble); }
         break;
-      case 'resume':          bubble = { id: m.messageId, text: m.content }; render(bubble); break; // REPLACE
-      case 'run_state':       if (TERMINAL.has(m.runStatus)) inflightId = null; break;
-      case 'complete':        inflightId = null; break;
-      case 'run_cancelled':   inflightId = null; break;
+      case 'resume':
+        bubble = { id: m.messageId, text: m.content }; render(bubble); // REPLACE
+        if (m.runId === awaitingFinal) { inflightId = null; runId = null; awaitingFinal = null; }
+        break;
+      case 'run_state':
+        if (!TERMINAL.has(m.runStatus) || m.runStatus === 'completed') {
+          runId = runId ?? m.runId;                                 // adopt it if following none
+          if (m.runStatus === 'completed') awaitingFinal = m.runId; // keep ids until its resume
+        } else {
+          inflightId = null; runId = null;                          // no resume follows
+        }
+        break;
+      case 'complete':
+      case 'run_cancelled':   inflightId = null; runId = null; awaitingFinal = null; break;
     }
   };
 
-  // Reconnect on an unclean close. url() automatically carries thread_id + resume_message_id.
+  // Reconnect on an unclean close. url() carries thread_id and the resume ids it holds.
   ws.onclose = (ev) => { if (!ev.wasClean) setTimeout(connect, 1000); };
   return ws;
 }
@@ -301,6 +333,7 @@ connect();
 - **Resume is a full snapshot** → on `resume`, replace the bubble text, then append chunks.
 - **`resume_message_id` requires `thread_id`** → never send it alone (it would be ignored).
 - **Reconnect order** → history → `run_state` → `message_created` → `resume` → live chunks.
-- **Clear the in-flight id** → on `complete`, `run_cancelled`, or a terminal `run_state`.
+- **Clear the in-flight id** → on `complete`, `run_cancelled`, a non-`completed` terminal
+  `run_state`, or the `resume` that follows a `completed` one.
 - **SDK** → listen for `resume` + `runState` (the single reconnect-status event);
   reconnect parameters are automatic.

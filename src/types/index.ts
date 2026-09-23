@@ -96,6 +96,12 @@ export interface CreateAgentRequest {
   maxTokens?: number;
   agentType?: 'orchestrator' | 'primary' | 'subagent';
   executionMode?: 'assistant' | 'execution-only';
+  /** Server default: true. */
+  canDelegate?: boolean;
+  /** Server default: true. */
+  canBeDelegatedTo?: boolean;
+  /** 0-10. Server default: 1. */
+  maxDelegationDepth?: number;
   subagentLifecycle?: SubagentLifecycleConfig;
   memoryExtractionEnabled?: boolean;
   memoryEmbeddingModel?: string;
@@ -600,9 +606,19 @@ export interface ChatCompletionResponse {
   };
 }
 
+/**
+ * Response of `POST /v1/agents/auth/websocket`, exactly as the worker sends it.
+ * This previously declared `expires_at: string`, a field the server has never
+ * returned — so it always read as `undefined`.
+ */
 export interface ConnectionToken {
   token: string;
-  expires_at: string;
+  /** Lifetime in seconds. */
+  expiresIn: number;
+  /** Unix SECONDS, not milliseconds. */
+  expiresAt: number;
+  tokenType: 'Bearer';
+  scope: string;
 }
 
 export interface VectorSearchComparisonFilter {
@@ -797,7 +813,8 @@ export type KnownWebSocketMessageType =
   'thread_info' | 'thread_history' | 'typing' | 'tool_use' | 'token_usage' | 'error' |
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
-  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong';
+  'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
+  'message_received';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
@@ -845,6 +862,15 @@ export interface WebSocketMessage {
   // string on every path but the generic onMessage catch, which sends { message, code }.
   error?: string | { message: string; code?: string };
   code?: string; // Auth/lifecycle and protocol refusals (e.g. UNKNOWN_TYPE, INVALID_REQUEST_ID).
+  // complete frames
+  failed?: boolean;
+  cancelled?: boolean;
+  reason?: string;
+  usage?: RunUsageTotals;
+  // token_usage frames
+  model?: string;
+  call?: LlmCallUsage;
+  totals?: RunUsageTotals;
   // thread_history payload
   messages?: ThreadHistoryMessage[];
   messageCount?: number;
@@ -892,6 +918,80 @@ export interface ThreadHistoryMessage {
   /** Remote URLs only — base64 `data:` images are stripped server-side to stay under the frame size limit. */
   images?: Array<{ url: string; detail?: string }>;
   toolCalls?: unknown[];
+}
+
+/** One LLM call's token counts, as reported on a `token_usage` frame. */
+export interface LlmCallUsage {
+  /** Includes cached input tokens. */
+  promptTokens: number;
+  completionTokens: number;
+  /** Input tokens served from the provider's prompt cache (a subset of promptTokens). */
+  cachedTokens: number;
+}
+
+/** A run's cumulative token counts across every LLM call it has made so far. */
+export interface RunUsageTotals {
+  /** Includes cached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+  /** A subset of inputTokens. */
+  cachedInputTokens: number;
+  llmCallCount: number;
+  models: string[];
+}
+
+/** `token_usage`: emitted after each LLM call a run makes. Requires server support. */
+export interface TokenUsageEvent {
+  runId?: string;
+  model?: string;
+  call: LlmCallUsage;
+  /** Cumulative for the run, so a consumer that misses a frame still converges on the next. */
+  totals: RunUsageTotals;
+  requestId?: string;
+}
+
+/**
+ * `complete`: a run's terminal frame. Exactly one of the outcomes holds: `cancelled`,
+ * `failed`, or neither (completed). Every field but `messageId` is forwarded only when
+ * the server sent it, so an absent field means "not reported", never "false".
+ */
+export interface CompleteEvent {
+  messageId?: string;
+  runId?: string;
+  failed?: boolean;
+  cancelled?: boolean;
+  /** e.g. `'expired'` on a failed run. */
+  reason?: string;
+  /** Structured `{ code, message }` on failed runs that recorded one. */
+  error?: unknown;
+  /** The run's final totals, when the terminal path had them. Requires server support. */
+  usage?: RunUsageTotals;
+  requestId?: string;
+}
+
+export type RunOutcome = 'completed' | 'failed' | 'cancelled';
+
+/** Result of `RagwallaWebSocket.runToCompletion()`. */
+export interface RunResult {
+  runId: string;
+  threadId?: string;
+  userMessageId?: string;
+  status: RunOutcome;
+  /** The assistant text streamed for this run, message by message in order of appearance. */
+  text: string;
+  messageIds: string[];
+  /** The failure the server reported, when `status` is `'failed'`. */
+  error?: unknown;
+  reason?: string;
+  /**
+   * The run's token totals. `source: 'terminal'` means the server stamped them on the terminal
+   * frame and they are final. `source: 'stream'` means they come from the last `token_usage`
+   * frame seen and may undercount if frames were missed (see `reconnected`). Absent when the
+   * server reported no usage at all — treat that as unknown, never as zero.
+   */
+  usage?: RunUsageTotals & { source: 'terminal' | 'stream' };
+  /** True when the socket dropped and reconnected while this run was in flight. */
+  reconnected: boolean;
 }
 
 export interface RagwallaError {
