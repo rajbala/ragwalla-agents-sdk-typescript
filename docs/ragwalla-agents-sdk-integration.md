@@ -562,6 +562,29 @@ await client.agents.refreshTools(agent.id);
 // The agent can now call tools from the CRM MCP server during conversations.
 ```
 
+## Thread events
+Tell a conversation that something happened outside it: a deploy finished, a payment cleared, an import failed. Typically a tool starts slow work, records the conversation (`X-Origin-Thread-ID ?? X-Thread-ID`), and your backend posts the event when the work settles.
+
+```ts
+await ragwalla.threads.events.create(threadId, {
+  type: 'deployment.completed',
+  summary: 'Build 14 is live at https://acme.example',   // what the agent reads
+  data: { buildId: 'b14', url: 'https://acme.example' },  // for your clients only
+  visibility: 'both',                                     // 'client' (default) | 'agent' | 'both'
+  idempotency_key: 'build_14:completed',                  // safe to retry
+});
+```
+
+- **Clients** (`client`, `both`): delivered live to the sockets open on the thread as a `threadEvent`, and included in `thread_history` for sockets connected with `includeEvents: true` (rows with `rowKind: 'thread_event'`, `content` = summary, `event` = `{ type, visibility, data }`). A live event's `messageId` equals its history row id; an event can arrive more than once (a replay, or a socket that was reconnecting), so dedupe by `messageId`.
+  ```ts
+  const ws = new RagwallaWebSocket({ baseURL, includeEvents: true });
+  ws.on('threadEvent', ({ threadId, messageId, event }) => {
+    if (event.type === 'deployment.completed') reloadPreview((event.data as { url: string }).url);
+  });
+  ```
+- **Agent** (`agent`, `both`): part of the agent's context from its next turn, as `[Event: <type>] <summary>`. `summary` is required for these; `data` never reaches the model. Recording an event does not start a turn.
+- **Requirements:** the thread must name an active, enabled agent in its project (`metadata.agent_id`, fixed once set). With an `idempotency_key`, a replay returns the recorded event with 200 and writes nothing — but delivers to clients again.
+
 ## Outbound webhooks
 
 Ragwalla pushes real-time events to your HTTPS endpoint via outbound webhooks. Use them for LLM usage metering, channel activity tracking, and integration with external systems.
@@ -784,8 +807,15 @@ await ragwalla.threads.messages.create({
 ```
 
 2) When the agent triggers an MCP tool, the MCP HTTP transport adds these headers (see `tool-execution-service` and MCP HTTP transport):
-- `X-Message-Metadata: <JSON string of your metadata>`
-- `X-User-ID`, `X-Project-ID`, `X-Thread-ID`, `X-Agent-ID`, `X-Run-ID` (execution context)
+- `X-Message-Metadata: <JSON string of your metadata>` — the metadata of the message the run answers (not a later message on the same thread). A run that serves no message (for example a continuation after a sub-agent result) sends none.
+- `X-User-ID`, `X-Project-ID`, `X-Thread-ID`, `X-Agent-ID`, `X-Run-ID` (execution context: the thread and run actually executing the tool)
+
+When the tool is called by a spawned or delegated **sub-agent**, its `X-Thread-ID` is the sub-agent's own thread, so these identify the conversation turn the work serves:
+- `X-Message-Metadata`: the originating message's metadata, forwarded unchanged through nested sub-agents
+- `X-Origin-Thread-ID`, `X-Origin-Run-ID`: the conversation thread and run that started the work
+- `X-Parent-Agent-ID`, `X-Parent-Run-ID`: the agent and run that started this sub-agent
+
+A call made by the turn's own agent has no `X-Origin-*` headers: its `X-Thread-ID` and `X-Run-ID` already are the origin. Use `X-Origin-Thread-ID ?? X-Thread-ID` as "the conversation this work belongs to", for example to post a thread event when slow work started by the tool finishes (see Thread events).
 
 3) In your MCP server, read and parse the header:
 ```ts

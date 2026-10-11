@@ -8,6 +8,7 @@ import {
   type RunOutcome,
   type RunResult,
   type RunUsageTotals,
+  type ThreadEventFrame,
   type TokenUsageEvent,
 } from '../types/index.js';
 
@@ -269,6 +270,11 @@ export interface WebSocketConfig {
   maxKbCharsPerChunk?: number;
   /** When true, the agent will embed the current user message and merge semantically relevant past messages before applying truncation */
   semanticAugmentation?: boolean;
+  /**
+   * When true, `thread_history` includes the thread's client-visible thread events
+   * (rows with `rowKind: 'thread_event'`). Live `threadEvent`s are delivered either way.
+   */
+  includeEvents?: boolean;
 }
 
 export type WebSocketReconnectReason = 'auto_reconnect' | 'send';
@@ -306,6 +312,7 @@ export class RagwallaWebSocket {
   private eventHandlers: Map<string, (event: any) => void> = new Map();
   private debug: boolean;
   private continuationMode: 'auto' | 'manual';
+  private readonly includeEvents: boolean;
   private getReconnectToken?: WebSocketReconnectTokenProvider;
   private truncationStrategy?: TruncationStrategy;
   private maxKbCharsPerChunk?: number;
@@ -335,6 +342,7 @@ export class RagwallaWebSocket {
     this.reconnectDelay = config.reconnectDelay ?? 1000;
     this.debug = config.debug || false;
     this.continuationMode = config.continuationMode === 'manual' ? 'manual' : 'auto';
+    this.includeEvents = config.includeEvents === true;
     this.getReconnectToken = config.getReconnectToken;
     this.truncationStrategy = config.truncationStrategy;
     this.maxKbCharsPerChunk = config.maxKbCharsPerChunk;
@@ -714,6 +722,9 @@ export class RagwallaWebSocket {
       token,
       continuation_mode: this.continuationMode
     });
+    if (this.includeEvents) {
+      params.set('include_events', 'true');
+    }
     if (effectiveThreadId) {
       params.set('thread_id', effectiveThreadId);
     }
@@ -1658,6 +1669,17 @@ export class RagwallaWebSocket {
         // Cloudflare agent state updates - emit as raw message
         emit('agentState', message.data || message);
         break;
+      case 'thread_event': {
+        // A client-visible event recorded on this socket's thread (POST /v1/threads/:id/events).
+        const frame = message as unknown as ThreadEventFrame;
+        const threadEvent: ThreadEventFrame = {
+          threadId: frame.threadId,
+          messageId: frame.messageId,
+          event: frame.event,
+        };
+        emit('threadEvent', threadEvent);
+        break;
+      }
       default:
         emit('rawMessage', message);
     }
