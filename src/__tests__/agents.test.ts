@@ -125,4 +125,62 @@ describe('AgentsResource', () => {
     expect(result.failed).toEqual([]);
     expect(result.total).toBe(1);
   });
+
+  it('sets a grant\'s access with the wire body the server validates', async () => {
+    const response = {
+      object: 'agent_skill_access',
+      grant_id: 'ata_1',
+      access: { owner_presence: 'attended', audiences: [{ type: 'channel', channel_id: 'ach_1' }] },
+      access_controls: { owner_presence: true, audiences: true, runs_as: [] },
+    };
+    client.put.mockResolvedValue(response);
+
+    const result = await agents.updateSkillAccess('agent_123', 'ata_1', {
+      owner_presence: 'attended',
+      audiences: [{ type: 'channel', channel_id: 'ach_1' }],
+    });
+
+    expect(client.put).toHaveBeenCalledWith('/v1/agents/agent_123/tools/ata_1/access', {
+      owner_presence: 'attended',
+      audiences: [{ type: 'channel', channel_id: 'ach_1' }],
+    });
+    expect(result).toEqual(response);
+  });
+
+  it('attaches a skill with its access in one request', async () => {
+    const response = {
+      object: 'agent_skill',
+      id: 'ata_2',
+      grant_id: 'ata_2',
+      agentId: 'agent_123',
+      tool: { type: 'mcp', name: 'crm_lookup' },
+      access: { owner_presence: 'attended', audiences: [] },
+      grantedBy: 'user_1',
+      grantedAt: 1,
+    };
+    client.post.mockResolvedValue(response);
+
+    const result = await agents.attachSkillWithAccess(
+      'agent_123',
+      { type: 'mcp', name: 'crm_lookup' } as Partial<Tool>,
+      { owner_presence: 'attended', audiences: [] }
+    );
+
+    expect(client.post).toHaveBeenCalledWith('/v1/agents/agent_123/tools', {
+      type: 'mcp',
+      name: 'crm_lookup',
+      access: { owner_presence: 'attended', audiences: [] },
+    });
+    expect(result).toEqual(response);
+  });
+
+  it('throws when the server granted the skill without the requested access', async () => {
+    client.post.mockResolvedValue({ object: 'agent_skill', id: 'ata_3', agentId: 'agent_123', tool: {} });
+
+    await expect(agents.attachSkillWithAccess(
+      'agent_123',
+      { type: 'mcp', name: 'crm_lookup' } as Partial<Tool>,
+      { owner_presence: 'attended', audiences: [] }
+    )).rejects.toThrow('granted skill ata_3 to agent agent_123 without the requested access');
+  });
 });

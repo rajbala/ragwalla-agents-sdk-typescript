@@ -235,13 +235,86 @@ export interface MCPTool extends BaseTool {
   parameters?: Record<string, any>;
 }
 
+/**
+ * Who may make an agent run a built-in, fixed by the server:
+ * - `conversation`: every turn;
+ * - `memory`: turns rooted in the owner, and the senders of a channel with memory of its own;
+ * - `shareable`: turns rooted in the owner, and the senders of the channels its grant is open to;
+ * - `owner_only`: turns rooted in the owner at `owner_presence_floor` or above, never an outside sender.
+ */
+export type SystemToolAccessClass = 'conversation' | 'memory' | 'shareable' | 'owner_only';
+
 export interface SystemTool extends BaseTool {
   type: 'system';
   category?: string;
   parameters?: Record<string, any>;
+  /** Reported by listSystemSkills(). */
+  access_class?: SystemToolAccessClass;
+  /** How present the owner must be for this built-in to run, reported by listSystemSkills(). */
+  owner_presence_floor?: OwnerPresence;
 }
 
 export type Tool = FunctionTool | AssistantTool | ApiTool | KnowledgeBaseTool | KnowledgeGraphToolDef | MCPTool | SystemTool;
+
+/**
+ * How present the agent's owner must be for a turn rooted in them to run a tool, in
+ * increasing order: `delegated` (owner-rooted work with no person in the loop, such as a
+ * spawned child), `unattended` (a task an attended turn scheduled), `attended` (the owner is
+ * waiting on the turn).
+ */
+export type OwnerPresence = 'delegated' | 'unattended' | 'attended';
+
+/** A channel whose outside senders a grant also admits. */
+export interface ToolAccessAudience {
+  type: 'channel';
+  channel_id: string;
+}
+
+/** Who may make the agent use a granted tool. Every grant starts `delegated` with no audiences. */
+export interface ToolAccess {
+  owner_presence: OwnerPresence;
+  audiences: ToolAccessAudience[];
+}
+
+/**
+ * What of a grant's access the owner may decide. A grant that reaches a built-in (`runs_as`)
+ * also takes the built-in's rule, so the server may fix its owner presence, its audiences or both.
+ */
+export interface ToolAccessControls {
+  /** Whether `owner_presence` may be changed. */
+  owner_presence: boolean;
+  /** Whether channels may be added to `audiences`. */
+  audiences: boolean;
+  /** The built-ins this grant reaches. */
+  runs_as: string[];
+}
+
+export interface ToolGrantAccess {
+  /** The grant's id, which updateSkillAccess() takes. */
+  grant_id: string;
+  access: ToolAccess;
+  access_controls: ToolAccessControls;
+}
+
+/** A tool as listSkills() returns it: the tool plus its grant's access. */
+export type AgentToolGrant = Tool & ToolGrantAccess & { object: 'agent_skill' };
+
+export interface ToolAccessResponse extends ToolGrantAccess {
+  object: 'agent_skill_access';
+}
+
+/** What attachSkillWithAccess() returns: the new grant and the access it was granted with. */
+export interface AttachSkillWithAccessResponse {
+  object: 'agent_skill';
+  /** The grant's id, the same as `grant_id`. */
+  id: string;
+  grant_id: string;
+  agentId: string;
+  tool: Tool;
+  access: ToolAccess;
+  grantedBy: string;
+  grantedAt: number;
+}
 
 export interface BulkAttachCreatedItem {
   index: number;
