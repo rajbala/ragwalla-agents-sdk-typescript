@@ -1,6 +1,6 @@
 import { HTTPClient } from './client/http-client.js';
 import { RagwallaWebSocket } from './client/websocket-client.js';
-import type { WebSocketReconnectTokenProvider } from './client/websocket-client.js';
+import type { WebSocketConfig } from './client/websocket-client.js';
 import { AgentsResource } from './resources/agents.js';
 import { AssistantsResource } from './resources/assistants.js';
 import { ThreadsResource } from './resources/threads.js';
@@ -74,12 +74,9 @@ export class Ragwalla {
   /**
    * Create a WebSocket connection for real-time communication
    */
-  createWebSocket(config?: {
-    reconnectAttempts?: number;
-    reconnectDelay?: number;
-    continuationMode?: 'auto' | 'manual';
-    getReconnectToken?: WebSocketReconnectTokenProvider;
-  }): RagwallaWebSocket {
+  // Every WebSocketConfig option except the two this client supplies, so a new socket
+  // option (includeEvents, truncationStrategy, ...) is reachable here without a cast.
+  createWebSocket(config?: Omit<WebSocketConfig, 'baseURL' | 'debug'>): RagwallaWebSocket {
     return new RagwallaWebSocket({
       baseURL: this.config.baseURL,
       debug: this.config.debug,

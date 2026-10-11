@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { RagwallaWebSocket, RunToCompletionError } from '../client/websocket-client';
+import Ragwalla from '../index';
 import type { RunResult } from '../types/index';
 
 /**
@@ -286,6 +287,12 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
 
     expect(threadEvent).not.toHaveBeenCalled();
     expect(rawMessage).toHaveBeenCalledWith({ type: 'thread_event', threadId: 'thread_1' });
+  });
+
+  it('lets Ragwalla.createWebSocket enable includeEvents', async () => {
+    const ragwalla = new Ragwalla({ apiKey: 'key', baseURL: 'https://api.example.com/v1' });
+    await connectOpen(ragwalla.createWebSocket({ reconnectAttempts: 0, includeEvents: true }));
+    expect(new URL(FakeWebSocket.last.url).searchParams.get('include_events')).toBe('true');
   });
 
   it('emits raw frame events for known frames before SDK normalization', async () => {
