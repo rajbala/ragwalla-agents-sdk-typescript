@@ -11,6 +11,7 @@ import {
   AgentToolGrant,
   ToolAccess,
   ToolAccessResponse,
+  AttachSkillWithAccessResponse,
   type BulkAttachSkillsResponse,
 } from '../types/index.js';
 
@@ -131,6 +132,27 @@ export class AgentsResource {
   async attachSkill(agentId: string, skill: Partial<Tool>): Promise<Tool> {
     const response = await this.client.post<any>(`/v1/agents/${agentId}/tools`, skill);
     return this.unwrapToolResponse(response);
+  }
+
+  /**
+   * Attach a skill to an agent together with who may make the agent use it, in one request:
+   * the grant is never live at another decision, as it is between attachSkill() and
+   * updateSkillAccess().
+   *
+   * Refusals are a `RagwallaAPIError` whose `code` says why; nothing is granted:
+   * - 400 `unknown_channel`: an audience is not one of this agent's channels;
+   * - 409 `skill_already_attached`: the agent already has this skill; set its access with
+   *   updateSkillAccess();
+   * - 409 `tool_access_fixed`: the skill reaches a built-in whose rule fixes what was asked;
+   * - 409 `tool_changed`: a requested channel changed, or the skill was granted, while this
+   *   request was in flight; read the agent's skills and channels again.
+   */
+  async attachSkillWithAccess(
+    agentId: string,
+    skill: Partial<Tool>,
+    access: ToolAccess
+  ): Promise<AttachSkillWithAccessResponse> {
+    return this.client.post<AttachSkillWithAccessResponse>(`/v1/agents/${agentId}/tools`, { ...skill, access });
   }
 
   /**

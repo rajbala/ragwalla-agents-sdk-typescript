@@ -146,4 +146,31 @@ describe('AgentsResource', () => {
     });
     expect(result).toEqual(response);
   });
+
+  it('attaches a skill with its access in one request', async () => {
+    const response = {
+      object: 'agent_skill',
+      id: 'ata_2',
+      grant_id: 'ata_2',
+      agentId: 'agent_123',
+      tool: { type: 'mcp', name: 'crm_lookup' },
+      access: { owner_presence: 'attended', audiences: [] },
+      grantedBy: 'user_1',
+      grantedAt: 1,
+    };
+    client.post.mockResolvedValue(response);
+
+    const result = await agents.attachSkillWithAccess(
+      'agent_123',
+      { type: 'mcp', name: 'crm_lookup' } as Partial<Tool>,
+      { owner_presence: 'attended', audiences: [] }
+    );
+
+    expect(client.post).toHaveBeenCalledWith('/v1/agents/agent_123/tools', {
+      type: 'mcp',
+      name: 'crm_lookup',
+      access: { owner_presence: 'attended', audiences: [] },
+    });
+    expect(result).toEqual(response);
+  });
 });

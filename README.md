@@ -235,6 +235,19 @@ await ragwalla.agents.updateSkillAccess(agent.id, crm.grant_id, {
 });
 ```
 
+To grant a skill with its access from the start, so it is never live at the default:
+
+```typescript
+const granted = await ragwalla.agents.attachSkillWithAccess(agent.id, crmSkill, {
+  owner_presence: 'attended',
+  audiences: [],
+});
+// granted.grant_id, granted.access
+```
+
+It refuses a skill the agent already has (409 `skill_already_attached`); use
+`updateSkillAccess()` for that.
+
 `owner_presence` is `'delegated'`, `'unattended'` (also a task an attended turn scheduled) or
 `'attended'` (only a person acting as the owner, waiting on the turn). `audiences` replaces the
 grant's current list.

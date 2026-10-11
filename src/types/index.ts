@@ -303,6 +303,19 @@ export interface ToolAccessResponse extends ToolGrantAccess {
   object: 'agent_skill_access';
 }
 
+/** What attachSkillWithAccess() returns: the new grant and the access it was granted with. */
+export interface AttachSkillWithAccessResponse {
+  object: 'agent_skill';
+  /** The grant's id, the same as `grant_id`. */
+  id: string;
+  grant_id: string;
+  agentId: string;
+  tool: Tool;
+  access: ToolAccess;
+  grantedBy: string;
+  grantedAt: number;
+}
+
 export interface BulkAttachCreatedItem {
   index: number;
   skill: Tool;
