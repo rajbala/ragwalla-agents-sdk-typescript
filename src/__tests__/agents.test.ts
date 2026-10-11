@@ -173,4 +173,14 @@ describe('AgentsResource', () => {
     });
     expect(result).toEqual(response);
   });
+
+  it('throws when the server granted the skill without the requested access', async () => {
+    client.post.mockResolvedValue({ object: 'agent_skill', id: 'ata_3', agentId: 'agent_123', tool: {} });
+
+    await expect(agents.attachSkillWithAccess(
+      'agent_123',
+      { type: 'mcp', name: 'crm_lookup' } as Partial<Tool>,
+      { owner_presence: 'attended', audiences: [] }
+    )).rejects.toThrow('granted skill ata_3 to agent agent_123 without the requested access');
+  });
 });

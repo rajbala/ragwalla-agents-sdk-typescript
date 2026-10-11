@@ -146,13 +146,23 @@ export class AgentsResource {
    * - 409 `tool_access_fixed`: the skill reaches a built-in whose rule fixes what was asked;
    * - 409 `tool_changed`: a requested channel changed, or the skill was granted, while this
    *   request was in flight; read the agent's skills and channels again.
+   *
+   * A server that predates this option ignores `access` and grants the skill at the default;
+   * this throws then, naming the grant, so its access can be set with updateSkillAccess().
    */
   async attachSkillWithAccess(
     agentId: string,
     skill: Partial<Tool>,
     access: ToolAccess
   ): Promise<AttachSkillWithAccessResponse> {
-    return this.client.post<AttachSkillWithAccessResponse>(`/v1/agents/${agentId}/tools`, { ...skill, access });
+    const response = await this.client.post<AttachSkillWithAccessResponse>(`/v1/agents/${agentId}/tools`, { ...skill, access });
+    if (response.access === undefined) {
+      throw new Error(
+        `The server granted skill ${response.id} to agent ${agentId} without the requested access: `
+        + 'it does not support access on attach. Set it with updateSkillAccess().'
+      );
+    }
+    return response;
   }
 
   /**

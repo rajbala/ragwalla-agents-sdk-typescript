@@ -246,7 +246,8 @@ const granted = await ragwalla.agents.attachSkillWithAccess(agent.id, crmSkill, 
 ```
 
 It refuses a skill the agent already has (409 `skill_already_attached`); use
-`updateSkillAccess()` for that.
+`updateSkillAccess()` for that. Against a server that predates this option, the skill is
+granted at the default and the method throws, naming the grant.
 
 `owner_presence` is `'delegated'`, `'unattended'` (also a task an attended turn scheduled) or
 `'attended'` (only a person acting as the owner, waiting on the turn). `audiences` replaces the
