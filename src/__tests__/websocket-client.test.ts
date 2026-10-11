@@ -274,6 +274,20 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(threadEvent).toHaveBeenCalledWith({ threadId: 'thread_1', messageId: 'evt_1', event });
   });
 
+  it('passes a thread_event frame missing its fields to rawMessage, not threadEvent', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const threadEvent = jest.fn();
+    const rawMessage = jest.fn();
+    client.on('threadEvent', threadEvent);
+    client.on('rawMessage', rawMessage);
+
+    FakeWebSocket.last.frame({ type: 'thread_event', threadId: 'thread_1' });
+
+    expect(threadEvent).not.toHaveBeenCalled();
+    expect(rawMessage).toHaveBeenCalledWith({ type: 'thread_event', threadId: 'thread_1' });
+  });
+
   it('emits raw frame events for known frames before SDK normalization', async () => {
     const client = newClient();
     await connectOpen(client);

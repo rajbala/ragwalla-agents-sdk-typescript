@@ -814,7 +814,7 @@ export type KnownWebSocketMessageType =
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
   'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
-  'message_received';
+  'message_received' | 'thread_event';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
@@ -839,6 +839,8 @@ export interface WebSocketMessage {
   userId?: string;
   createNewThread?: boolean;
   messageId?: string;
+  /** The event on a `thread_event` frame; see ThreadEventFrame. */
+  event?: ThreadEventFrame['event'];
   isTyping?: boolean; // For typing messages
   tools?: string[]; // For tool_use messages
   isNewThread?: boolean; // For thread_info messages

@@ -1671,12 +1671,13 @@ export class RagwallaWebSocket {
         break;
       case 'thread_event': {
         // A client-visible event recorded on this socket's thread (POST /v1/threads/:id/events).
-        const frame = message as unknown as ThreadEventFrame;
-        const threadEvent: ThreadEventFrame = {
-          threadId: frame.threadId,
-          messageId: frame.messageId,
-          event: frame.event,
-        };
+        const { threadId, messageId, event } = message;
+        if (threadId === undefined || messageId === undefined || event === undefined) {
+          // Not the frame the worker sends; pass it through rather than emit a partial event.
+          emit('rawMessage', message);
+          break;
+        }
+        const threadEvent: ThreadEventFrame = { threadId, messageId, event };
         emit('threadEvent', threadEvent);
         break;
       }
