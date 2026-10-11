@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { RagwallaWebSocket, RunToCompletionError } from '../client/websocket-client';
+import Ragwalla from '../index';
 import type { RunResult } from '../types/index';
 
 /**
@@ -245,6 +246,55 @@ describe('Cloudflare Workers WebSocket transport', () => {
 });
 
 describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
+  it('asks for thread events in history only when includeEvents is set', async () => {
+    await connectOpen(newClient());
+    expect(new URL(FakeWebSocket.last.url).searchParams.has('include_events')).toBe(false);
+
+    await connectOpen(new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 0, includeEvents: true }));
+    expect(new URL(FakeWebSocket.last.url).searchParams.get('include_events')).toBe('true');
+  });
+
+  it('keeps include_events on an auto-reconnect', async () => {
+    const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 1, reconnectDelay: 0, includeEvents: true });
+    await connectOpen(client, { threadId: 'thread_1' });
+    expect((await reconnectUrl(client)).searchParams.get('include_events')).toBe('true');
+  });
+
+  it('emits threadEvent for a thread_event frame', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const threadEvent = jest.fn();
+    client.on('threadEvent', threadEvent);
+
+    const event = {
+      id: 'evt_1', type: 'deployment.completed', visibility: 'both',
+      summary: 'Build 14 is live', data: { url: 'https://app.example' }, createdAt: 1791741347,
+    };
+    FakeWebSocket.last.frame({ type: 'thread_event', threadId: 'thread_1', messageId: 'evt_1', event });
+
+    expect(threadEvent).toHaveBeenCalledWith({ threadId: 'thread_1', messageId: 'evt_1', event });
+  });
+
+  it('passes a thread_event frame missing its fields to rawMessage, not threadEvent', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const threadEvent = jest.fn();
+    const rawMessage = jest.fn();
+    client.on('threadEvent', threadEvent);
+    client.on('rawMessage', rawMessage);
+
+    FakeWebSocket.last.frame({ type: 'thread_event', threadId: 'thread_1' });
+
+    expect(threadEvent).not.toHaveBeenCalled();
+    expect(rawMessage).toHaveBeenCalledWith({ type: 'thread_event', threadId: 'thread_1' });
+  });
+
+  it('lets Ragwalla.createWebSocket enable includeEvents', async () => {
+    const ragwalla = new Ragwalla({ apiKey: 'key', baseURL: 'https://api.example.com/v1' });
+    await connectOpen(ragwalla.createWebSocket({ reconnectAttempts: 0, includeEvents: true }));
+    expect(new URL(FakeWebSocket.last.url).searchParams.get('include_events')).toBe('true');
+  });
+
   it('emits raw frame events for known frames before SDK normalization', async () => {
     const client = newClient();
     await connectOpen(client);

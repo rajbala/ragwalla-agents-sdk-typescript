@@ -814,7 +814,7 @@ export type KnownWebSocketMessageType =
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
   'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
-  'message_received';
+  'message_received' | 'thread_event';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
@@ -839,6 +839,8 @@ export interface WebSocketMessage {
   userId?: string;
   createNewThread?: boolean;
   messageId?: string;
+  /** The event on a `thread_event` frame; see ThreadEventFrame. */
+  event?: ThreadEventFrame['event'];
   isTyping?: boolean; // For typing messages
   tools?: string[]; // For tool_use messages
   isNewThread?: boolean; // For thread_info messages
@@ -918,6 +920,75 @@ export interface ThreadHistoryMessage {
   /** Remote URLs only — base64 `data:` images are stripped server-side to stay under the frame size limit. */
   images?: Array<{ url: string; detail?: string }>;
   toolCalls?: unknown[];
+  /**
+   * Server-authored row kind: null for a turn's answer; 'plan', 'subagent_report',
+   * 'email_sent', or 'thread_event' otherwise.
+   */
+  rowKind?: string | null;
+  /**
+   * Present on a thread event row (rowKind 'thread_event'), which history carries only
+   * when the socket connected with `includeEvents`. `id` is the `messageId` of the event's
+   * live `threadEvent`, and `content` its summary.
+   */
+  event?: { type: string; visibility: 'client' | 'both'; data: unknown };
+}
+
+/** Who a thread event is for. Only `client` and `both` events reach connected clients. */
+export type ThreadEventVisibility = 'client' | 'agent' | 'both';
+
+/**
+ * An event an integrator's backend recorded on a thread with `threads.events.create`
+ * (`POST /v1/threads/:threadId/events`): something that happened outside the
+ * conversation, such as a deploy finishing.
+ */
+export interface ThreadEvent {
+  id: string;
+  object: 'thread.event';
+  thread_id: string;
+  type: string;
+  visibility: ThreadEventVisibility;
+  summary: string | null;
+  data: unknown;
+  /** Unix seconds. */
+  created_at: number;
+}
+
+interface CreateThreadEventBase {
+  /** Integrator-defined, for example `deployment.completed`. 1–200 characters. */
+  type: string;
+  /** JSON for clients, at most 16 KiB serialized. Never shown to the agent. */
+  data?: unknown;
+  /** Makes the request safe to retry: a replay returns the recorded event and writes nothing. */
+  idempotency_key?: string;
+}
+
+/**
+ * Parameters for `threads.events.create`. An event the agent can see (`agent` or `both`)
+ * requires a `summary`, which is the only part of it the agent reads; a client-only event
+ * (the default) may omit it.
+ */
+export type CreateThreadEventParams =
+  | (CreateThreadEventBase & { visibility?: 'client'; summary?: string })
+  | (CreateThreadEventBase & { visibility: 'agent' | 'both'; summary: string });
+
+/**
+ * A client-visible thread event, delivered live to the sockets open on its thread
+ * (`threadEvent`). `messageId` equals the event's history row id, so a client that
+ * renders it live and later reloads history can recognise it; a replayed or held
+ * event can arrive more than once.
+ */
+export interface ThreadEventFrame {
+  threadId: string;
+  messageId: string;
+  event: {
+    id: string;
+    type: string;
+    visibility: 'client' | 'both';
+    summary: string | null;
+    data: unknown;
+    /** Unix seconds. */
+    createdAt: number;
+  };
 }
 
 /** One LLM call's token counts, as reported on a `token_usage` frame. */
