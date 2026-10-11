@@ -125,4 +125,25 @@ describe('AgentsResource', () => {
     expect(result.failed).toEqual([]);
     expect(result.total).toBe(1);
   });
+
+  it('sets a grant\'s access with the wire body the server validates', async () => {
+    const response = {
+      object: 'agent_skill_access',
+      grant_id: 'ata_1',
+      access: { owner_presence: 'attended', audiences: [{ type: 'channel', channel_id: 'ach_1' }] },
+      access_controls: { owner_presence: true, audiences: true, runs_as: [] },
+    };
+    client.put.mockResolvedValue(response);
+
+    const result = await agents.updateSkillAccess('agent_123', 'ata_1', {
+      owner_presence: 'attended',
+      audiences: [{ type: 'channel', channel_id: 'ach_1' }],
+    });
+
+    expect(client.put).toHaveBeenCalledWith('/v1/agents/agent_123/tools/ata_1/access', {
+      owner_presence: 'attended',
+      audiences: [{ type: 'channel', channel_id: 'ach_1' }],
+    });
+    expect(result).toEqual(response);
+  });
 });

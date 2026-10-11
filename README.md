@@ -209,6 +209,41 @@ const orchestrator = await ragwalla.agents.create({
 await ragwalla.agents.refreshTools(agent.id);
 ```
 
+### Skill Access
+
+Granting a skill says the agent has it; access says who may make the agent use it. Every grant
+starts at `owner_presence: 'delegated'` with no audiences. That means any turn rooted in the
+agent's owner may run it, including a spawned child or scheduled work, and no outside channel
+sender may.
+
+```typescript
+const { data } = await ragwalla.agents.listSkills(agent.id);
+const crm = data.find((skill) => skill.name === 'crm_lookup')!;
+// crm.access: { owner_presence: 'delegated', audiences: [] }
+// crm.access_controls: what of that the owner may change, and the built-ins it reaches (runs_as)
+
+// Only while the owner is waiting on the turn, and also for senders on one Telegram channel
+await ragwalla.agents.updateSkillAccess(agent.id, crm.grant_id, {
+  owner_presence: 'attended',
+  audiences: [{ type: 'channel', channel_id: telegramChannel.id }],
+});
+
+// Close it to outside senders again
+await ragwalla.agents.updateSkillAccess(agent.id, crm.grant_id, {
+  owner_presence: 'attended',
+  audiences: [],
+});
+```
+
+`owner_presence` is `'delegated'`, `'unattended'` (also a task an attended turn scheduled) or
+`'attended'` (only a person acting as the owner, waiting on the turn). `audiences` replaces the
+grant's current list.
+
+Built-ins have a fixed rule, which `listSystemSkills()` reports as `access_class` and
+`owner_presence_floor`. A grant that reaches a built-in takes that rule too, so the server
+refuses a change it fixes with 409 `tool_access_fixed`. It refuses with 409 `tool_changed`
+if the grant changed while the request was in flight.
+
 ### Delegation & Child Agents
 
 Agents can delegate and be delegated to by default. Opt out at creation time:

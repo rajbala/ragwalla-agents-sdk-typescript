@@ -8,6 +8,9 @@ import {
   Tool,
   ToolType,
   SystemTool,
+  AgentToolGrant,
+  ToolAccess,
+  ToolAccessResponse,
   type BulkAttachSkillsResponse,
 } from '../types/index.js';
 
@@ -110,15 +113,15 @@ export class AgentsResource {
   async listSkills(
     agentId: string,
     params?: { type?: ToolType }
-  ): Promise<{ object: 'list'; data: Tool[] }> {
-    return this.client.get<{ object: 'list'; data: Tool[] }>(`/v1/agents/${agentId}/tools`, params);
+  ): Promise<{ object: 'list'; data: AgentToolGrant[] }> {
+    return this.client.get<{ object: 'list'; data: AgentToolGrant[] }>(`/v1/agents/${agentId}/tools`, params);
   }
 
   /** @deprecated Use listSkills() instead */
   async listTools(
     agentId: string,
     params?: { type?: ToolType }
-  ): Promise<{ object: 'list'; data: Tool[] }> {
+  ): Promise<{ object: 'list'; data: AgentToolGrant[] }> {
     return this.listSkills(agentId, params);
   }
 
@@ -159,6 +162,23 @@ export class AgentsResource {
   /** @deprecated Use updateSkill() instead */
   async updateTool(agentId: string, toolId: string, updates: Partial<Tool>): Promise<Tool> {
     return this.updateSkill(agentId, toolId, updates);
+  }
+
+  /**
+   * Set who may make the agent use a granted skill: how present the owner must be for a turn
+   * rooted in them (`owner_presence`), and the channels whose outside senders it also admits
+   * (`audiences`, replacing the current list). Takes the grant's `grant_id` from listSkills().
+   *
+   * Refusals are a `RagwallaAPIError` whose `code` says why:
+   * - 400 `unknown_channel`: an audience is not one of this agent's channels;
+   * - 404 `agent_skill_not_found`: no such grant on this agent;
+   * - 409 `tool_access_fixed`: the grant reaches a built-in whose rule fixes what was asked
+   *   (see the grant's `access_controls`);
+   * - 409 `tool_changed`: the grant changed while this request was in flight; read it again
+   *   before deciding again.
+   */
+  async updateSkillAccess(agentId: string, grantId: string, access: ToolAccess): Promise<ToolAccessResponse> {
+    return this.client.put<ToolAccessResponse>(`/v1/agents/${agentId}/tools/${grantId}/access`, access);
   }
 
   /**
