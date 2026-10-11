@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { ThreadsResource } from '../resources/threads';
-import type { ThreadEvent } from '../types/index';
+import type { CreateThreadEventParams, ThreadEvent } from '../types/index';
 
 class MockHTTPClient {
   public post: jest.MockedFunction<(path: string, data?: any) => any> = jest.fn();
@@ -44,5 +44,17 @@ describe('threads.events', () => {
       idempotency_key: 'build_14:completed',
     });
     expect(result).toEqual(recorded);
+  });
+});
+
+describe('CreateThreadEventParams', () => {
+  // Checked by the type checker (ts-jest compiles this file): an event the agent can see
+  // must carry the summary the agent reads.
+  it('requires a summary when the agent can see the event', () => {
+    const clientOnly: CreateThreadEventParams = { type: 'tick' };
+    const forAgent: CreateThreadEventParams = { type: 'note', visibility: 'agent', summary: 'read me' };
+    // @ts-expect-error -- an agent-visible event without a summary is rejected at compile time
+    const missingSummary: CreateThreadEventParams = { type: 'note', visibility: 'both' };
+    expect([clientOnly, forAgent, missingSummary]).toHaveLength(3);
   });
 });

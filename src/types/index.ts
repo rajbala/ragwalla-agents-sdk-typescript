@@ -951,18 +951,23 @@ export interface ThreadEvent {
   created_at: number;
 }
 
-export interface CreateThreadEventParams {
+interface CreateThreadEventBase {
   /** Integrator-defined, for example `deployment.completed`. 1–200 characters. */
   type: string;
   /** JSON for clients, at most 16 KiB serialized. Never shown to the agent. */
   data?: unknown;
-  /** The text the agent reads. Required when visibility is `agent` or `both`. */
-  summary?: string;
-  /** Defaults to `client`. */
-  visibility?: ThreadEventVisibility;
   /** Makes the request safe to retry: a replay returns the recorded event and writes nothing. */
   idempotency_key?: string;
 }
+
+/**
+ * Parameters for `threads.events.create`. An event the agent can see (`agent` or `both`)
+ * requires a `summary`, which is the only part of it the agent reads; a client-only event
+ * (the default) may omit it.
+ */
+export type CreateThreadEventParams =
+  | (CreateThreadEventBase & { visibility?: 'client'; summary?: string })
+  | (CreateThreadEventBase & { visibility: 'agent' | 'both'; summary: string });
 
 /**
  * A client-visible thread event, delivered live to the sockets open on its thread
