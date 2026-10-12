@@ -90,4 +90,49 @@ describe('MessagesResource', () => {
     expect(result.has_more).toBe(true);
     expect(result.data[0].role).toBe('assistant');
   });
+
+  it('asks for thread events and returns them in place', async () => {
+    const fakeResponse: ListMessagesResponse = {
+      object: 'list',
+      data: [
+        {
+          id: 'evt_1',
+          object: 'thread.message',
+          thread_id: 'thread_1',
+          role: 'system',
+          content: [{ type: 'text', text: { value: 'Build b1 is live.', annotations: [] } }],
+          row_kind: 'thread_event',
+          event: { type: 'deployment.completed', visibility: 'both', data: { buildId: 'b1' } },
+        },
+      ],
+      first_id: 'evt_1',
+      last_id: 'evt_1',
+      has_more: false,
+    };
+    client.get.mockResolvedValue(fakeResponse);
+
+    const result = await messages.list('thread_1', { order: 'asc', include_events: true });
+
+    expect(client.get).toHaveBeenCalledWith('/v1/threads/thread_1/messages', {
+      order: 'asc',
+      include_events: true,
+    });
+    expect(result.data[0].event?.type).toBe('deployment.completed');
+  });
+});
+
+describe('Workers client', () => {
+  it('lists messages, events included, through the Workers entry point', async () => {
+    const { Ragwalla: WorkersRagwalla } = await import('../workers');
+    const { HTTPClient } = await import('../client/http-client');
+    const get = jest
+      .spyOn(HTTPClient.prototype, 'get')
+      .mockResolvedValue({ object: 'list', data: [], first_id: null, last_id: null, has_more: false } as never);
+
+    const ragwalla = new WorkersRagwalla({ apiKey: 'test-key', baseURL: 'https://example.ai.ragwalla.com/v1' });
+    await ragwalla.messages.list('thread_1', { include_events: true });
+
+    expect(get).toHaveBeenCalledWith('/v1/threads/thread_1/messages', { include_events: true });
+    get.mockRestore();
+  });
 });
