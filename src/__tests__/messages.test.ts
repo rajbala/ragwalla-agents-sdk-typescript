@@ -120,3 +120,19 @@ describe('MessagesResource', () => {
     expect(result.data[0].event?.type).toBe('deployment.completed');
   });
 });
+
+describe('Workers client', () => {
+  it('lists messages, events included, through the Workers entry point', async () => {
+    const { Ragwalla: WorkersRagwalla } = await import('../workers');
+    const { HTTPClient } = await import('../client/http-client');
+    const get = jest
+      .spyOn(HTTPClient.prototype, 'get')
+      .mockResolvedValue({ object: 'list', data: [], first_id: null, last_id: null, has_more: false } as never);
+
+    const ragwalla = new WorkersRagwalla({ apiKey: 'test-key', baseURL: 'https://example.ai.ragwalla.com/v1' });
+    await ragwalla.messages.list('thread_1', { include_events: true });
+
+    expect(get).toHaveBeenCalledWith('/v1/threads/thread_1/messages', { include_events: true });
+    get.mockRestore();
+  });
+});

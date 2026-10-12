@@ -26,6 +26,7 @@ import type { WebSocketConfig } from './client/websocket-client.js';
 import { AgentsResource } from './resources/agents.js';
 import { AssistantsResource } from './resources/assistants.js';
 import { ThreadsResource } from './resources/threads.js';
+import { MessagesResource } from './resources/messages.js';
 import { VectorStoresResource } from './resources/vector-stores.js';
 import { QuotaResource } from './resources/quota.js';
 import { ModelsResource } from './resources/models.js';
@@ -50,6 +51,7 @@ export class Ragwalla {
   public readonly agents: AgentsResource;
   public readonly assistants: AssistantsResource;
   public readonly threads: ThreadsResource;
+  public readonly messages: MessagesResource;
   public readonly vectorStores: VectorStoresResource;
   public readonly quota: QuotaResource;
   public readonly models: ModelsResource;
@@ -70,6 +72,7 @@ export class Ragwalla {
     this.agents = new AgentsResource(client);
     this.assistants = new AssistantsResource(client);
     this.threads = new ThreadsResource(client);
+    this.messages = new MessagesResource(client);
     this.vectorStores = new VectorStoresResource(client);
     this.quota = new QuotaResource(client);
     this.models = new ModelsResource(client);
