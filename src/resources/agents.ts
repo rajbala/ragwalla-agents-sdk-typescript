@@ -166,16 +166,28 @@ export class AgentsResource {
   }
 
   /**
-   * Attach multiple skills to an agent in one request
+   * Attach multiple skills to an agent in one request. An item may carry `access`, which it is
+   * granted with as attachSkillWithAccess() would grant it; such an item is refused as its own
+   * attach would be, as a `failed` item with the error's `code`. A skill the agent already has
+   * is then a failed item (`skill_already_attached`), never a skipped one.
    */
   async attachSkills(
     agentId: string,
-    skills: Array<Partial<Tool>>
+    skills: Array<Partial<Tool> & { access?: ToolAccess }>
   ): Promise<BulkAttachSkillsResponse> {
-    return this.client.post<BulkAttachSkillsResponse>(
+    const response = await this.client.post<BulkAttachSkillsResponse>(
       `/v1/agents/${agentId}/tools/bulk-attach`,
       { skills }
     );
+    // A server that predates access on attach strips it and grants the skill at the default.
+    const unapplied = response.created.filter((item) => skills[item.index].access !== undefined && item.access === undefined);
+    if (unapplied.length > 0) {
+      throw new Error(
+        `The server granted ${unapplied.map((item) => item.skill.id).join(', ')} to agent ${agentId} without the requested access: `
+        + 'it does not support access on attach. Set it with updateSkillAccess().'
+      );
+    }
+    return response;
   }
 
   /** @deprecated Use attachSkill() instead */

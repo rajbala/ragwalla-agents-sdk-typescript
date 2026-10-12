@@ -319,6 +319,8 @@ export interface AttachSkillWithAccessResponse {
 export interface BulkAttachCreatedItem {
   index: number;
   skill: Tool;
+  /** The access the skill was granted with, when its item asked for one. */
+  access?: ToolAccess;
 }
 
 export interface BulkAttachSkippedItem {
@@ -334,6 +336,12 @@ export interface BulkAttachFailedItem {
   name?: string;
   toolName?: string;
   error: string;
+  /**
+   * The API error code, for an item refused as its own attach would be:
+   * `unknown_channel`, `tool_access_fixed`, `tool_changed`, `skill_already_attached`
+   * or `mcp_server_not_found`.
+   */
+  code?: string;
 }
 
 export interface BulkAttachSkillsResponse {

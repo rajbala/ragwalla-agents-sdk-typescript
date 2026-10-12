@@ -183,4 +183,27 @@ describe('AgentsResource', () => {
       { owner_presence: 'attended', audiences: [] }
     )).rejects.toThrow('granted skill ata_3 to agent agent_123 without the requested access');
   });
+
+  it('passes each bulk item\'s access through', async () => {
+    client.post.mockResolvedValue({ object: 'bulk_attach_result', agentId: 'agent_123', created: [], skipped: [], failed: [], total: 1 });
+
+    await agents.attachSkills('agent_123', [
+      { type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } } as Partial<Tool> & { access: { owner_presence: 'attended'; audiences: [] } },
+    ]);
+
+    expect(client.post).toHaveBeenCalledWith('/v1/agents/agent_123/tools/bulk-attach', {
+      skills: [{ type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } }],
+    });
+  });
+
+  it('throws when the server granted a bulk item without the access it asked for', async () => {
+    client.post.mockResolvedValue({
+      object: 'bulk_attach_result', agentId: 'agent_123', skipped: [], failed: [], total: 1,
+      created: [{ index: 0, skill: { id: 'ata_4', type: 'mcp', name: 'crm_lookup' } }],
+    });
+
+    await expect(agents.attachSkills('agent_123', [
+      { type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } } as Partial<Tool> & { access: { owner_presence: 'attended'; audiences: [] } },
+    ])).rejects.toThrow('granted ata_4 to agent agent_123 without the requested access');
+  });
 });
