@@ -99,6 +99,7 @@ export * from './client/websocket-client.js';
 export * from './resources/agents.js';
 export * from './resources/assistants.js';
 export * from './resources/threads.js';
+export * from './resources/messages.js';
 export * from './resources/vector-stores.js';
 export * from './resources/quota.js';
 export * from './resources/mcp-servers.js';
