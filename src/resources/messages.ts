@@ -30,6 +30,27 @@ export interface Message {
   run_id?: string | null;
   file_ids?: string[];
   status?: 'in_progress' | 'incomplete' | 'completed';
+  /**
+   * Server-authored row kind: null for a turn's answer; 'plan', 'subagent_report',
+   * 'email_sent', or 'thread_event' otherwise.
+   */
+  row_kind?: string | null;
+  /**
+   * On a thread event row (row_kind 'thread_event'), which a list returns only with
+   * `include_events: true`: the event itself. The row's role is 'system' and its
+   * content is the event's summary.
+   */
+  event?: MessageThreadEvent;
+}
+
+/** A client-visible thread event as a message list carries it. */
+export interface MessageThreadEvent {
+  /** Integrator-defined, for example `deployment.completed`. */
+  type: string;
+  /** Only client-visible events are listed. */
+  visibility: 'client' | 'both';
+  /** The event's JSON payload for clients, or null. */
+  data: unknown;
 }
 
 export interface CreateMessageRequest {
@@ -45,6 +66,12 @@ export interface ListMessagesParams {
   before?: string;
   after?: string;
   run_id?: string;
+  /**
+   * List the thread's client-visible events in place among its messages (rows with
+   * row_kind 'thread_event' and an `event`), as `includeEvents` does for a socket's
+   * thread history. Off by default.
+   */
+  include_events?: boolean;
 }
 
 export interface ListMessagesResponse {

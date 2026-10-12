@@ -90,4 +90,33 @@ describe('MessagesResource', () => {
     expect(result.has_more).toBe(true);
     expect(result.data[0].role).toBe('assistant');
   });
+
+  it('asks for thread events and returns them in place', async () => {
+    const fakeResponse: ListMessagesResponse = {
+      object: 'list',
+      data: [
+        {
+          id: 'evt_1',
+          object: 'thread.message',
+          thread_id: 'thread_1',
+          role: 'system',
+          content: [{ type: 'text', text: { value: 'Build b1 is live.', annotations: [] } }],
+          row_kind: 'thread_event',
+          event: { type: 'deployment.completed', visibility: 'both', data: { buildId: 'b1' } },
+        },
+      ],
+      first_id: 'evt_1',
+      last_id: 'evt_1',
+      has_more: false,
+    };
+    client.get.mockResolvedValue(fakeResponse);
+
+    const result = await messages.list('thread_1', { order: 'asc', include_events: true });
+
+    expect(client.get).toHaveBeenCalledWith('/v1/threads/thread_1/messages', {
+      order: 'asc',
+      include_events: true,
+    });
+    expect(result.data[0].event?.type).toBe('deployment.completed');
+  });
 });
