@@ -204,6 +204,30 @@ describe('AgentsResource', () => {
 
     await expect(agents.attachSkills('agent_123', [
       { type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } } as Partial<Tool> & { access: { owner_presence: 'attended'; audiences: [] } },
-    ])).rejects.toThrow('granted ata_4 to agent agent_123 without the requested access');
+    ])).rejects.toThrow('did not apply the requested access to ata_4 on agent agent_123');
+  });
+
+  it('throws when the server skipped a bulk item that asked for access', async () => {
+    client.post.mockResolvedValue({
+      object: 'bulk_attach_result', agentId: 'agent_123', created: [], failed: [], total: 1,
+      skipped: [{ index: 0, reason: 'already_attached', existingSkillId: 'ata_5' }],
+    });
+
+    await expect(agents.attachSkills('agent_123', [
+      { type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } } as Partial<Tool> & { access: { owner_presence: 'attended'; audiences: [] } },
+    ])).rejects.toThrow('did not apply the requested access to ata_5');
+  });
+
+  it('judges the response by the items as they were sent', async () => {
+    const skills: Array<Partial<Tool> & { access?: { owner_presence: 'attended'; audiences: [] } }> = [
+      { type: 'mcp', name: 'crm_lookup', access: { owner_presence: 'attended', audiences: [] } } as Partial<Tool> & { access: { owner_presence: 'attended'; audiences: [] } },
+    ];
+    client.post.mockImplementation(async () => {
+      delete skills[0].access;
+      return { object: 'bulk_attach_result', agentId: 'agent_123', skipped: [], failed: [], total: 1,
+        created: [{ index: 0, skill: { id: 'ata_6', type: 'mcp', name: 'crm_lookup' } }] };
+    });
+
+    await expect(agents.attachSkills('agent_123', skills)).rejects.toThrow('ata_6');
   });
 });

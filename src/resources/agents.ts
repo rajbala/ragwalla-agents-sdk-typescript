@@ -175,15 +175,21 @@ export class AgentsResource {
     agentId: string,
     skills: Array<Partial<Tool> & { access?: ToolAccess }>
   ): Promise<BulkAttachSkillsResponse> {
+    // Which items asked for access, as they were sent.
+    const askedForAccess = new Set(skills.flatMap((skill, index) => skill.access === undefined ? [] : [index]));
     const response = await this.client.post<BulkAttachSkillsResponse>(
       `/v1/agents/${agentId}/tools/bulk-attach`,
       { skills }
     );
-    // A server that predates access on attach strips it and grants the skill at the default.
-    const unapplied = response.created.filter((item) => skills[item.index].access !== undefined && item.access === undefined);
+    // A server that predates access on attach strips it: it grants the skill at the default, or
+    // skips one the agent already has, where this server refuses it (skill_already_attached).
+    const unapplied = [
+      ...response.created.filter((item) => askedForAccess.has(item.index) && item.access === undefined).map((item) => item.skill.id),
+      ...response.skipped.filter((item) => askedForAccess.has(item.index)).map((item) => item.existingSkillId ?? `item ${item.index}`),
+    ];
     if (unapplied.length > 0) {
       throw new Error(
-        `The server granted ${unapplied.map((item) => item.skill.id).join(', ')} to agent ${agentId} without the requested access: `
+        `The server did not apply the requested access to ${unapplied.join(', ')} on agent ${agentId}: `
         + 'it does not support access on attach. Set it with updateSkillAccess().'
       );
     }
