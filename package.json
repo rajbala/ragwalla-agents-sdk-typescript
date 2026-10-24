@@ -47,9 +47,6 @@
   "engines": {
     "node": ">=22"
   },
-  "dependencies": {
-    "zod": "^3.22.4"
-  },
   "overrides": {
     "minimatch": ">=10.2.1"
   },
