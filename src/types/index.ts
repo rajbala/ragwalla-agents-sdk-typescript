@@ -1611,6 +1611,8 @@ export interface KnowledgeGraph {
   embedding_model: string;
   extraction_model?: string;
   extraction_schema?: Record<string, unknown> | null;
+  /** The document schema the extraction schema was compiled from, when the graph was given one. */
+  document_schema?: Record<string, unknown> | null;
   extraction_prompt?: string | null;
   entity_count: number;
   relationship_count: number;
@@ -1630,6 +1632,11 @@ export interface CreateKnowledgeGraphRequest {
   };
   extraction_model?: string;
   extraction_schema?: Record<string, unknown>;
+  /**
+   * An object-style JSON Schema describing the documents. The server compiles it into the
+   * extraction schema. Send this or `extraction_schema`, not both.
+   */
+  document_schema?: Record<string, unknown>;
   extraction_prompt?: string;
 }
 
@@ -1638,6 +1645,11 @@ export interface UpdateKnowledgeGraphRequest {
   description?: string;
   extraction_model?: string;
   extraction_schema?: Record<string, unknown> | null;
+  /**
+   * Replaces the document schema and recompiles the extraction schema from it; `null` removes
+   * it. Send this or `extraction_schema`, not both.
+   */
+  document_schema?: Record<string, unknown> | null;
   extraction_prompt?: string | null;
 }
 
