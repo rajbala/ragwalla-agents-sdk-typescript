@@ -7,7 +7,17 @@ export type TruncationStrategy =
 
 export interface RagwallaConfig {
   apiKey: string;
-  baseURL: string; // Now mandatory - must be a valid https://.../v1 URL
+  /**
+   * An https://.../v1 URL. Defaults to https://api.ragwalla.com/v1, which reaches the endpoint
+   * the key names. A key created before keys named their endpoint works only on its endpoint's
+   * own URL, so pass that, or create a new key.
+   */
+  baseURL?: string;
+  /**
+   * The endpoint a platform key (pk-...) calls, sent as the X-Worker-ID header. A platform key
+   * can reach several endpoints; any other key names its own.
+   */
+  endpointId?: string;
   projectId?: string; // Sent as X-Project-ID header — required for org-level keys that create project-scoped resources
   timeout?: number;
   debug?: boolean; // Enable debug logging

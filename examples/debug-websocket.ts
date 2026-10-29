@@ -4,7 +4,6 @@ import { Ragwalla } from '../src';
 async function debugWebSocketExample() {
   const ragwalla = new Ragwalla({
     apiKey: process.env.RAGWALLA_API_KEY!,
-    baseURL: 'https://example.ai.ragwalla.com/v1', // Replace with your organization's URL
     debug: true // Enable detailed debug logging
   });
 

@@ -11,6 +11,7 @@ import {
   type ThreadEventFrame,
   type TokenUsageEvent,
 } from '../types/index.js';
+import { DEFAULT_BASE_URL } from './base-url.js';
 
 // Universal WebSocket interface
 interface UniversalWebSocket {
@@ -254,7 +255,8 @@ const RUN_STATE_SETTLE_MS = 1_000;
 const ERROR_OUTCOME_SETTLE_MS = 3_000;
 
 export interface WebSocketConfig {
-  baseURL: string; // Required - must be https://.../v1 or wss://.../v1
+  /** An https://.../v1 or wss://.../v1 URL. Defaults to wss://api.ragwalla.com/v1, which reaches the endpoint the token names. */
+  baseURL?: string;
   reconnectAttempts?: number;
   reconnectDelay?: number;
   debug?: boolean; // Enable debug logging
@@ -337,7 +339,7 @@ export class RagwallaWebSocket {
   private runWaiters: Set<() => void> = new Set();
 
   constructor(config: WebSocketConfig) {
-    this.validateAndSetWebSocketURL(config.baseURL);
+    this.validateAndSetWebSocketURL(config.baseURL ?? DEFAULT_BASE_URL);
     this.reconnectAttempts = config.reconnectAttempts ?? 3;
     this.reconnectDelay = config.reconnectDelay ?? 1000;
     this.debug = config.debug || false;

@@ -19,7 +19,6 @@ import { Ragwalla } from '@ragwalla/agents-sdk/workers';
 
 interface Env {
   RAGWALLA_API_KEY: string;
-  RAGWALLA_BASE_URL: string; // https://<sub>.ai.ragwalla.com/v1
   RAGWALLA_AGENT_ID: string;
 }
 
@@ -48,7 +47,6 @@ export default {
 
     const ragwalla = new Ragwalla({
       apiKey: env.RAGWALLA_API_KEY,
-      baseURL: env.RAGWALLA_BASE_URL,
     });
 
     const upstream = ragwalla.createWebSocket({

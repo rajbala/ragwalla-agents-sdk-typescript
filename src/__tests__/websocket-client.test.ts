@@ -245,6 +245,28 @@ describe('Cloudflare Workers WebSocket transport', () => {
   });
 });
 
+describe('where the socket connects', () => {
+  function connectedTo(): string {
+    const url = new URL(FakeWebSocket.last.url);
+    return `${url.origin}${url.pathname}`;
+  }
+
+  it('is api.ragwalla.com when no baseURL is given, where the token names its endpoint', async () => {
+    await connectOpen(new RagwallaWebSocket({ reconnectAttempts: 0 }));
+    expect(connectedTo()).toBe('wss://api.ragwalla.com/v1/agents/agent/conn');
+  });
+
+  it('is api.ragwalla.com for a client made with only an API key', async () => {
+    await connectOpen(new Ragwalla({ apiKey: 'key' }).createWebSocket({ reconnectAttempts: 0 }));
+    expect(connectedTo()).toBe('wss://api.ragwalla.com/v1/agents/agent/conn');
+  });
+
+  it('is the baseURL it is given', async () => {
+    await connectOpen(new RagwallaWebSocket({ baseURL: 'https://acme.ragwalla.ai.ragwalla.com/v1', reconnectAttempts: 0 }));
+    expect(connectedTo()).toBe('wss://acme.ragwalla.ai.ragwalla.com/v1/agents/agent/conn');
+  });
+});
+
 describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
   it('asks for thread events in history only when includeEvents is set', async () => {
     await connectOpen(newClient());

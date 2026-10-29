@@ -655,7 +655,7 @@ class AgentTestClient {
 async function main() {
   const config: TestConfig = {
     apiKey: process.env.RAGWALLA_API_KEY || '',
-    baseURL: process.env.RAGWALLA_BASE_URL || 'https://example.ai.ragwalla.com/v1',
+    baseURL: process.env.RAGWALLA_BASE_URL || 'https://api.ragwalla.com/v1',
     debug: process.env.DEBUG === 'true' || process.argv.includes('--debug'),
     timeout: parseInt(process.env.TIMEOUT || '30000'),
     agentId: process.env.RAGWALLA_AGENT_ID, // Optional: use existing agent
@@ -672,11 +672,6 @@ async function main() {
 
   if (!config.apiKey) {
     console.error('❌ RAGWALLA_API_KEY environment variable is required');
-    process.exit(1);
-  }
-
-  if (!config.baseURL.includes('.ai.ragwalla.com')) {
-    console.error('❌ RAGWALLA_BASE_URL must follow pattern: https://example.ai.ragwalla.com/v1');
     process.exit(1);
   }
 

@@ -15,12 +15,11 @@ import { Ragwalla } from 'ragwalla-agents-sdk-typescript';
 
 const client = new Ragwalla({
   apiKey: process.env.RAGWALLA_API_KEY!,
-  baseURL: 'https://<tenant>.ai.ragwalla.com/v1',
   timeout: 30_000,
   debug: false,
 });
 ```
-- REST base URL must match `https://*.ai.ragwalla.com/v1`.
+- The base URL defaults to `https://api.ragwalla.com/v1`, which reaches every endpoint: an API key names its own, and a platform key (`pk-*`) names one with `endpointId` (sent as `X-Worker-ID`).
 
 ## Platform endpoints (WfP)
 Manage dispatch endpoints with platform keys (`pk-*`). Provisioning is async: returns `status: "provisioning"`; poll until `status: "active"`.
@@ -216,7 +215,7 @@ If you forward upstream `error` frames too, keep them distinct from DO-local err
 ### Upstream connection (DO → Ragwalla)
 The DO is responsible for:
 
-- choosing the correct Ragwalla base URL `https://<tenant>.ai.ragwalla.com/v1` (upstream WS will be `wss://.../v1/...`)
+- connecting to Ragwalla at `wss://api.ragwalla.com/v1/...`, the default, where the WS token names the agent's endpoint
 - minting the Ragwalla WS token server-side (`agents.getToken`)
 - opening the upstream WS with `thread_id` and continuation mode
 
@@ -394,7 +393,7 @@ CREATE TABLE agents (
 ```
 
 ## Practical sequence for a new app
-1) Configure client (API key + baseURL).
+1) Configure client (API key; `endpointId` for a platform key).
 2) List orgs; pick one. Create a project (if needed).
 3) Create/configure an agent; attach skills/system skills.
 4) Create a thread (optionally seed messages).
@@ -577,7 +576,7 @@ await ragwalla.threads.events.create(threadId, {
 
 - **Clients** (`client`, `both`): delivered live to the sockets open on the thread as a `threadEvent`, and included in `thread_history` for sockets connected with `includeEvents: true` (rows with `rowKind: 'thread_event'`, `content` = summary, `event` = `{ type, visibility, data }`). A live event's `messageId` equals its history row id; an event can arrive more than once (a replay, or a socket that was reconnecting), so dedupe by `messageId`.
   ```ts
-  const ws = new RagwallaWebSocket({ baseURL, includeEvents: true });
+  const ws = new RagwallaWebSocket({ includeEvents: true });
   ws.on('threadEvent', ({ threadId, messageId, event }) => {
     if (event.type === 'deployment.completed') reloadPreview((event.data as { url: string }).url);
   });
@@ -595,7 +594,7 @@ Register a webhook via the dashboard or REST API:
 
 ```ts
 const response = await fetch(
-  `https://<tenant>.ai.ragwalla.com/v1/organizations/${orgId}/webhooks`,
+  `https://api.ragwalla.com/v1/organizations/${orgId}/webhooks`,
   {
     method: 'POST',
     headers: {

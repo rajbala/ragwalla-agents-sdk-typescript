@@ -1,9 +1,8 @@
-import { Ragwalla, RagwallaWebSocket } from '@ragwalla/agents-sdk/workers';
+import { Ragwalla } from '@ragwalla/agents-sdk/workers';
 
 // Cloudflare Workers environment bindings
 interface Env {
   RAGWALLA_API_KEY: string;
-  RAGWALLA_BASE_URL: string;
 }
 
 // Cloudflare Workers example
@@ -11,8 +10,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     // Initialize the Ragwalla client with environment variables
     const ragwalla = new Ragwalla({
-      apiKey: env.RAGWALLA_API_KEY, // Set this in your Worker environment
-      baseURL: env.RAGWALLA_BASE_URL // e.g., 'https://myorg.ai.ragwalla.com/v1'
+      apiKey: env.RAGWALLA_API_KEY // Set this in your Worker environment
     });
 
     try {
@@ -38,9 +36,8 @@ export default {
         max_num_results: 5
       });
 
-      // Construct WebSocket URL for the client to connect to
-      const wsBaseUrl = env.RAGWALLA_BASE_URL.replace('https://', 'wss://');
-      const websocketUrl = `${wsBaseUrl}/agents/${agent.id}/main?token=${tokenResponse.token}`;
+      // Construct WebSocket URL for the client to connect to. The token names the agent's endpoint.
+      const websocketUrl = `wss://api.ragwalla.com/v1/agents/${agent.id}/main?token=${tokenResponse.token}`;
 
       return new Response(JSON.stringify({
         agent: agent,
@@ -77,8 +74,7 @@ export default {
 
     // Initialize Ragwalla WebSocket client
     const ragwalla = new Ragwalla({
-      apiKey: env.RAGWALLA_API_KEY,
-      baseURL: env.RAGWALLA_BASE_URL
+      apiKey: env.RAGWALLA_API_KEY
     });
 
     // Get connection token
@@ -87,9 +83,7 @@ export default {
     });
 
     // Connect to Ragwalla WebSocket
-    const ws = new RagwallaWebSocket({
-      baseURL: env.RAGWALLA_BASE_URL // Will auto-convert https:// to wss://
-    });
+    const ws = ragwalla.createWebSocket();
 
     // Set up event handlers
     ws.on('connected', () => {

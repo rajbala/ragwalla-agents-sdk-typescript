@@ -34,7 +34,7 @@ the content. The client's only jobs are to **send the right reconnect parameters
 ```ts
 import { Ragwalla } from '@ragwalla/agents-sdk';
 
-const ragwalla = new Ragwalla({ apiKey, baseURL: 'https://<sub>.ai.ragwalla.com/v1' });
+const ragwalla = new Ragwalla({ apiKey });
 const { token } = await ragwalla.agents.getToken({ agent_id: agent.id, expires_in: 3600 });
 
 const ws = ragwalla.createWebSocket({
@@ -154,7 +154,7 @@ Fetch a short-lived WebSocket token from the REST API (the same call the SDK's `
 makes), then open:
 
 ```
-wss://<subdomain>.ai.ragwalla.com/v1/agents/<agentId>/<connectionId>
+wss://api.ragwalla.com/v1/agents/<agentId>/<connectionId>
     ?token=<token>
     &continuation_mode=auto
     [&thread_id=<threadId>]
@@ -269,7 +269,7 @@ chunks.
 ### 8. Minimal browser example
 
 ```js
-const SUB = '<subdomain>', AGENT = '<agentId>', TOKEN = '<token>';
+const AGENT = '<agentId>', TOKEN = '<token>';
 const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'incomplete', 'expired']);
 
 let threadId = KNOWN_THREAD_ID ?? null;   // null for a brand-new thread
@@ -283,7 +283,7 @@ function url() {
   if (threadId) p.set('thread_id', threadId);
   if (inflightId && threadId) p.set('resume_message_id', inflightId); // never without thread_id
   if (runId && threadId) p.set('resume_run_id', runId);                // likewise
-  return `wss://${SUB}.ai.ragwalla.com/v1/agents/${AGENT}/main?${p}`;
+  return `wss://api.ragwalla.com/v1/agents/${AGENT}/main?${p}`;
 }
 
 function connect() {

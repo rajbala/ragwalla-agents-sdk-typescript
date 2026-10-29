@@ -16,8 +16,7 @@ npm install @ragwalla/agents-sdk
 import { Ragwalla } from '@ragwalla/agents-sdk';
 
 const ragwalla = new Ragwalla({
-  apiKey: process.env.RAGWALLA_API_KEY!,
-  baseURL: 'https://example.ai.ragwalla.com/v1' // Required
+  apiKey: process.env.RAGWALLA_API_KEY!
 });
 
 // Create an agent
@@ -75,14 +74,19 @@ await ws.connect(agent.id, 'main', tokenResponse.token);
 
 ```typescript
 const ragwalla = new Ragwalla({
-  apiKey: 'your-api-key',                        // Required
-  baseURL: 'https://example.ai.ragwalla.com/v1', // Required - your custom domain
-  timeout: 30000,                                // Optional, request timeout in ms
-  debug: false                                   // Optional, enable debug logging
+  apiKey: 'your-api-key',                  // Required
+  baseURL: 'https://api.ragwalla.com/v1',  // Optional, this is the default
+  endpointId: 'my-endpoint',               // Optional, the endpoint a platform key calls
+  timeout: 30000,                          // Optional, request timeout in ms
+  debug: false                             // Optional, enable debug logging
 });
 ```
 
-**Important:** The `baseURL` must follow the pattern `https://[subdomain].ai.ragwalla.com/v1` where `[subdomain]` is your organization's unique identifier.
+Every endpoint is reached at `https://api.ragwalla.com/v1`. An API key names the endpoint it belongs to, and so does a WebSocket token, so you don't pass the endpoint's address.
+
+A platform key (`pk-...`) can reach several endpoints. Set `endpointId` to the one to call, and the SDK sends it as the `X-Worker-ID` header.
+
+A key created before keys named their endpoint can't be routed this way: `api.ragwalla.com` answers it with a `key_without_endpoint` error. Create a new key in the dashboard.
 
 ### Debug Logging
 
@@ -91,7 +95,6 @@ Enable debug logging to troubleshoot connection issues and monitor SDK behavior:
 ```typescript
 const ragwalla = new Ragwalla({
   apiKey: process.env.RAGWALLA_API_KEY!,
-  baseURL: 'https://example.ai.ragwalla.com/v1',
   debug: true // Enables detailed logging for HTTP and WebSocket
 });
 
@@ -1099,8 +1102,7 @@ import { Ragwalla } from '@ragwalla/agents-sdk/workers';
 export default {
   async fetch(request: Request, env: any): Promise<Response> {
     const ragwalla = new Ragwalla({
-      apiKey: env.RAGWALLA_API_KEY,
-      baseURL: env.RAGWALLA_BASE_URL // e.g., 'https://myorg.ai.ragwalla.com/v1'
+      apiKey: env.RAGWALLA_API_KEY
     });
 
     const agent = await ragwalla.agents.create({
@@ -1130,10 +1132,9 @@ export default {
 ```typescript
 import { RagwallaWebSocket } from '@ragwalla/agents-sdk/workers';
 
-// In your Workers WebSocket handler
-const ws = new RagwallaWebSocket({
-  baseURL: 'wss://myorg.ai.ragwalla.com/v1'
-});
+// In your Workers WebSocket handler. It connects to wss://api.ragwalla.com/v1,
+// where the token names the agent's endpoint.
+const ws = new RagwallaWebSocket({ continuationMode: 'auto' });
 
 await ws.connect(agentId, 'main', token);
 ```
@@ -1183,7 +1184,6 @@ npm install
 
 # Set your API key
 export RAGWALLA_API_KEY=your_api_key_here
-export RAGWALLA_BASE_URL=https://example.ai.ragwalla.com/v1
 
 # Run any example
 npx ts-node examples/basic-usage.ts
