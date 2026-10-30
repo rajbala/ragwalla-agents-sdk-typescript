@@ -1,16 +1,19 @@
 import { RagwallaConfig, RagwallaError } from '../types/index.js';
+import { DEFAULT_BASE_URL } from './base-url.js';
 
 export class HTTPClient {
   private apiKey: string;
   private baseURL!: string; // Assigned in validateAndSetBaseURL
   private projectId?: string;
+  private endpointId?: string;
   private timeout: number;
   private debug: boolean;
 
   constructor(config: RagwallaConfig) {
     this.apiKey = config.apiKey;
-    this.validateAndSetBaseURL(config.baseURL);
+    this.validateAndSetBaseURL(config.baseURL ?? DEFAULT_BASE_URL);
     this.projectId = config.projectId;
+    this.endpointId = config.endpointId;
     this.timeout = config.timeout || 30000;
     this.debug = config.debug || false;
   }
@@ -69,6 +72,9 @@ export class HTTPClient {
     };
     if (this.projectId) {
       headers['X-Project-ID'] = this.projectId;
+    }
+    if (this.endpointId) {
+      headers['X-Worker-ID'] = this.endpointId;
     }
     return headers;
   }
@@ -252,6 +258,9 @@ export class HTTPClient {
     };
     if (this.projectId) {
       headers['X-Project-ID'] = this.projectId;
+    }
+    if (this.endpointId) {
+      headers['X-Worker-ID'] = this.endpointId;
     }
 
     const controller = new AbortController();

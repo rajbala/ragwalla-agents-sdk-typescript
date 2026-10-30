@@ -3,8 +3,7 @@ import { Ragwalla } from '../src';
 // Example: Streaming chat via WebSocket
 async function streamingExample() {
   const ragwalla = new Ragwalla({
-    apiKey: process.env.RAGWALLA_API_KEY!,
-    baseURL: 'https://example.ai.ragwalla.com/v1' // Replace with your organization's URL
+    apiKey: process.env.RAGWALLA_API_KEY!
   });
 
   try {
