@@ -9,6 +9,7 @@ import {
   type RunResult,
   type RunUsageTotals,
   type ThreadEventFrame,
+  type AudioFrame,
   type TokenUsageEvent,
 } from '../types/index.js';
 import { DEFAULT_BASE_URL } from './base-url.js';
@@ -1681,6 +1682,13 @@ export class RagwallaWebSocket {
         }
         const threadEvent: ThreadEventFrame = { threadId, messageId, event };
         emit('threadEvent', threadEvent);
+        break;
+      }
+      case 'audio': {
+        // A part of an agent's spoken answer (its voice's reply_with_audio: 'always').
+        const frame = message as unknown as AudioFrame & { type: 'audio' };
+        const { type: _type, ...audio } = frame;
+        emit('audio', audio);
         break;
       }
       default:

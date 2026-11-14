@@ -1,4 +1,5 @@
-import { HTTPClient } from '../client/http-client.js';
+import { HTTPClient, type BinaryResponse } from '../client/http-client.js';
+import type { MessageAudio } from '../types/index.js';
 
 export interface MessageContentText {
   type: 'text';
@@ -41,6 +42,8 @@ export interface Message {
    * content is the event's summary.
    */
   event?: MessageThreadEvent;
+  /** The message's audio (an agent's spoken answer, in parts played in order), on every read of a stored message. */
+  audio?: MessageAudio[];
 }
 
 /** A client-visible thread event as a message list carries it. */
@@ -107,5 +110,17 @@ export class MessagesResource {
     params?: ListMessagesParams
   ): Promise<ListMessagesResponse> {
     return this.client.get<ListMessagesResponse>(`/v1/threads/${threadId}/messages`, params);
+  }
+
+  /**
+   * One part of a message's audio (see `Message.audio`): its bytes and media type.
+   */
+  async audio(
+    threadId: string,
+    messageId: string,
+    part: number,
+    direction: 'input' | 'output' = 'output'
+  ): Promise<BinaryResponse> {
+    return this.client.getBinary(`/v1/threads/${threadId}/messages/${messageId}/audio/${direction}/${part}`);
   }
 }

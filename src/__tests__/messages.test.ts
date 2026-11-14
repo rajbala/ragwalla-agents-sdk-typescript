@@ -5,6 +5,7 @@ import { MessagesResource, ListMessagesResponse, Message } from '../resources/me
 class MockHTTPClient {
   public get: jest.MockedFunction<(path: string, params?: any) => any> = jest.fn();
   public post: jest.MockedFunction<(path: string, data?: any) => any> = jest.fn();
+  public getBinary: jest.MockedFunction<(path: string) => any> = jest.fn();
 }
 
 describe('MessagesResource', () => {
@@ -118,6 +119,14 @@ describe('MessagesResource', () => {
       include_events: true,
     });
     expect(result.data[0].event?.type).toBe('deployment.completed');
+  });
+
+  it('fetches a part of a message’s audio from its route', async () => {
+    const binary = { data: new ArrayBuffer(3), contentType: 'audio/mpeg', headers: new Headers() };
+    client.getBinary.mockResolvedValue(binary);
+
+    expect(await messages.audio('thread_1', 'msg_1', 1)).toBe(binary);
+    expect(client.getBinary).toHaveBeenCalledWith('/v1/threads/thread_1/messages/msg_1/audio/output/1');
   });
 });
 

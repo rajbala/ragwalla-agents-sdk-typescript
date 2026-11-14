@@ -1,6 +1,13 @@
 import { RagwallaConfig, RagwallaError } from '../types/index.js';
 import { DEFAULT_BASE_URL } from './base-url.js';
 
+/** A binary response: its bytes, media type and headers (e.g. `x-ragwalla-sample-rate` on speech). */
+export interface BinaryResponse {
+  data: ArrayBuffer;
+  contentType: string | null;
+  headers: Headers;
+}
+
 export class HTTPClient {
   private apiKey: string;
   private baseURL!: string; // Assigned in validateAndSetBaseURL
@@ -147,6 +154,34 @@ export class HTTPClient {
     } catch (error) {
       this.log('error', 'GET request failed', { url: url.toString(), error });
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /** A binary response body (audio) and its headers. */
+  async getBinary(path: string): Promise<BinaryResponse> {
+    return this.binary(path, { method: 'GET', headers: this.getHeaders() });
+  }
+
+  /** POSTs JSON and reads a binary response body (audio). */
+  async postBinary(path: string, data: unknown): Promise<BinaryResponse> {
+    return this.binary(path, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(data) });
+  }
+
+  private async binary(path: string, init: RequestInit): Promise<BinaryResponse> {
+    const url = new URL(path, this.baseURL);
+    this.log('info', `Making ${init.method} (binary) request`, { url: url.toString() });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const response = await fetch(url.toString(), { ...init, signal: controller.signal });
+      if (!response.ok) await this.handleResponse<never>(response);
+      return {
+        data: await response.arrayBuffer(),
+        contentType: response.headers.get('content-type'),
+        headers: response.headers,
+      };
     } finally {
       clearTimeout(timeoutId);
     }
