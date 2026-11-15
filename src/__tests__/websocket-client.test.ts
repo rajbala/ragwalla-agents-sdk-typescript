@@ -297,6 +297,21 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(threadEvent).toHaveBeenCalledWith({ threadId: 'thread_1', messageId: 'evt_1', event });
   });
 
+  it('emits audio for a part of a spoken answer', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const audio = jest.fn();
+    client.on('audio', audio);
+
+    const part = {
+      runId: 'run_1', threadId: 'thread_1', messageId: 'msg_1', part: 0, parts: 2, final: false,
+      status: 'ready', url: '/v1/threads/thread_1/messages/msg_1/audio/output/0', contentType: 'audio/mpeg',
+    };
+    FakeWebSocket.last.frame({ type: 'audio', ...part });
+
+    expect(audio).toHaveBeenCalledWith(part);
+  });
+
   it('passes a thread_event frame missing its fields to rawMessage, not threadEvent', async () => {
     const client = newClient();
     await connectOpen(client);

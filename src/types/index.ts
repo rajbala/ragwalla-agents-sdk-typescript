@@ -43,6 +43,55 @@ export interface AgentChild {
   label?: string;
 }
 
+/**
+ * An agent's voice: the speech model, voice and output format its answers and its `speak_text`
+ * tool are synthesized in, checked against the endpoint's speech catalogue when saved, and
+ * whether its answers are spoken (`always`) or not (`never`, the voice is then the tool's alone).
+ */
+export interface AgentVoiceConfig {
+  speech: {
+    /** A speech model from `GET /v1/models` (`ragwalla.kind: 'speech'`), e.g. `elevenlabs/eleven_flash_v2_5` or `deepgram/aura-2`. */
+    model: string;
+    /** One of the model's voices: an ElevenLabs voice id, or a Deepgram Aura-2 voice such as `thalia-en`. */
+    voice: string;
+    format: SpeechFormat;
+  };
+  reply_with_audio: 'always' | 'never';
+}
+
+/** The output formats a speech model may produce (each model lists its own). */
+export type SpeechFormat = 'mp3' | 'opus' | 'wav' | 'pcm';
+
+/** One part of a message's audio. An answer is spoken in parts, played in order. */
+export interface MessageAudio {
+  /** `output` for synthesized speech, `input` for audio a turn transcribed. */
+  direction: 'input' | 'output';
+  part: number;
+  parts: number;
+  /** A failed part has no url, and no part after it was attempted. */
+  status: 'ready' | 'failed';
+  model: string;
+  content_type: string | null;
+  /** The authenticated route that serves the part (`messages.audio` fetches it). */
+  url: string | null;
+  error_code: string | null;
+}
+
+/** A part of an agent's spoken answer, sent to the thread's sockets as it becomes ready or fails. */
+export interface AudioFrame {
+  runId: string;
+  threadId: string;
+  messageId: string;
+  part: number;
+  parts: number;
+  /** The last frame of the message's audio: its last part, or the part that failed. */
+  final: boolean;
+  status: 'ready' | 'failed';
+  url?: string;
+  contentType?: string;
+  error?: { code: string; message: string };
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -81,6 +130,8 @@ export interface Agent {
     updatedAt: number;
   };
   subagentLifecycle?: SubagentLifecycleConfig;
+  /** Absent: the agent has no speech. */
+  voice?: AgentVoiceConfig;
   created_at?: string;
   updated_at?: string;
 }
@@ -116,6 +167,7 @@ export interface CreateAgentRequest {
   memoryExtractionEnabled?: boolean;
   memoryEmbeddingModel?: string;
   memoryUserScopingEnabled?: boolean;
+  voice?: AgentVoiceConfig;
 }
 
 export interface UpdateAgentRequest {
@@ -145,6 +197,8 @@ export interface UpdateAgentRequest {
   memoryExtractionEnabled?: boolean;
   memoryEmbeddingModel?: string;
   memoryUserScopingEnabled?: boolean;
+  /** `null` removes the agent's voice. */
+  voice?: AgentVoiceConfig | null;
 }
 
 export type AgentTool = Tool;
@@ -905,7 +959,7 @@ export type KnownWebSocketMessageType =
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
   'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
-  'message_received' | 'thread_event';
+  'message_received' | 'thread_event' | 'audio';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
@@ -1022,6 +1076,8 @@ export interface ThreadHistoryMessage {
    * live `threadEvent`, and `content` its summary.
    */
   event?: { type: string; visibility: 'client' | 'both'; data: unknown };
+  /** Its audio's parts (an agent's spoken answer); absent with none. */
+  audio?: MessageAudio[];
 }
 
 /** Who a thread event is for. Only `client` and `both` events reach connected clients. */
