@@ -59,6 +59,25 @@ describe('AgentsResource', () => {
     });
   });
 
+  it('sends platform instructions beside the owner\'s, and null to remove them', async () => {
+    client.post.mockResolvedValue({ id: 'agent_123', name: 'Support' });
+    client.put.mockResolvedValue({ id: 'agent_123', name: 'Support' });
+
+    await agents.create({
+      name: 'Support',
+      instructions: 'Be friendly.',
+      platformInstructions: 'Never quote prices.',
+    });
+    await agents.update('agent_123', { platformInstructions: null });
+
+    expect(client.post).toHaveBeenCalledWith('/v1/agents', {
+      name: 'Support',
+      instructions: 'Be friendly.',
+      platformInstructions: 'Never quote prices.',
+    });
+    expect(client.put).toHaveBeenCalledWith('/v1/agents/agent_123', { platformInstructions: null });
+  });
+
   it('rejects conflicting systemSkillIds and deprecated systemToolIds', async () => {
     await expect(agents.create({
       name: 'Coordinator',
