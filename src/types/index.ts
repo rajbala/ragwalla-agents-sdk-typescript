@@ -97,7 +97,13 @@ export interface Agent {
   name: string;
   description?: string;
   model?: string;
+  /** The owner's instructions. */
   instructions?: string;
+  /**
+   * The platform's instructions: set by the application that runs the agent, and sent to the
+   * model ahead of the owner's, labeled as taking precedence over them. null for none.
+   */
+  platformInstructions?: string | null;
   tools?: Tool[];
   systemToolsProvisioned?: boolean;
   systemToolIds?: string[];
@@ -140,7 +146,14 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   model?: string;
+  /** The owner's instructions. */
   instructions?: string;
+  /**
+   * The platform's instructions, sent ahead of the owner's and labeled as taking precedence.
+   * Any key that may modify the agent may set them; an application decides which of its own
+   * users may. At most 100,000 characters.
+   */
+  platformInstructions?: string | null;
   tools?: string[];
   /**
    * System skill IDs to provision with the agent. Omit to use platform defaults
@@ -173,7 +186,10 @@ export interface CreateAgentRequest {
 export interface UpdateAgentRequest {
   name?: string;
   description?: string;
+  /** The owner's instructions. */
   instructions?: string;
+  /** The platform's instructions; null or '' removes them. Omit to leave them as they are. */
+  platformInstructions?: string | null;
   model?: string;
   temperature?: number;
   topP?: number;

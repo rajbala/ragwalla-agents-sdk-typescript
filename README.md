@@ -125,6 +125,30 @@ const agent = await ragwalla.agents.create({
 });
 ```
 
+### Platform and owner instructions
+
+An agent has two instruction fields. `instructions` are the owner's. `platformInstructions` are
+the platform's: set by the application that runs the agent, and sent to the model first, labeled
+as taking precedence over the owner's. Ragwalla lets any key that may modify the agent set them,
+so an application decides which of its own users may change them (usually by exposing only
+`instructions` to them). The agent's own `update_agent_config` tool can't change them, and a
+subagent an agent creates carries its parent's.
+
+```typescript
+const agent = await ragwalla.agents.create({
+  name: 'Support Agent',
+  model: 'gpt-4o',
+  platformInstructions: 'Never quote prices. Escalate refunds to a person.',
+  instructions: 'You are a friendly support agent for Acme.',
+});
+
+// Later, the owner edits only their own instructions; the platform's are kept.
+await ragwalla.agents.update(agent.id, { instructions: 'Answer in Spanish.' });
+
+// null (or '') removes platform instructions.
+await ragwalla.agents.update(agent.id, { platformInstructions: null });
+```
+
 ### List Agents
 
 ```typescript
