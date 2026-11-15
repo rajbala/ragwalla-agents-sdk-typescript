@@ -24,6 +24,7 @@ import { RagwallaConfig } from './types/index.js';
 
 export class Ragwalla {
   public readonly agents: AgentsResource;
+  /** @deprecated Legacy OpenAI Assistants API compatibility. Use agents. */
   public readonly assistants: AssistantsResource;
   public readonly threads: ThreadsResource;
   public readonly messages: MessagesResource;
