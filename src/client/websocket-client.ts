@@ -271,7 +271,10 @@ export interface WebSocketConfig {
   truncationStrategy?: TruncationStrategy;
   /** Max chars per KB search result chunk sent to the LLM */
   maxKbCharsPerChunk?: number;
-  /** When true, the agent will embed the current user message and merge semantically relevant past messages before applying truncation */
+  /**
+   * @deprecated Set the agent's `conversationRecall` instead, which applies to every turn on every
+   * door. Honored only where the agent answers through a legacy assistant and recall is not on.
+   */
   semanticAugmentation?: boolean;
   /**
    * When true, `thread_history` includes the thread's client-visible thread events
@@ -963,6 +966,7 @@ export class RagwallaWebSocket {
     }
   }
 
+  /** @deprecated Set the agent's `conversationRecall` instead. */
   setSemanticAugmentation(enabled: boolean, options?: WebSocketRequestOptions): void {
     this.requireConnectedForRequest(options);
     this.semanticAugmentation = enabled;

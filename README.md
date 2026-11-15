@@ -21,8 +21,10 @@ const ragwalla = new Ragwalla({
 
 // Create an agent
 const agent = await ragwalla.agents.create({
-  name: 'My Assistant',
-  instructions: 'You are a helpful AI assistant.'
+  name: 'My Agent',
+  model: 'gpt-4o',
+  instructions: 'You are a helpful AI assistant.',
+  conversationRecall: { enabled: true }
 });
 
 // Get WebSocket token for real-time chat
@@ -50,7 +52,7 @@ await ws.connect(agent.id, 'main', tokenResponse.token);
 ## Features
 
 - ✅ **Agent Management** - Create, update, manage skills/tools, delegation, and child agents
-- ✅ **Assistant Management** - Create, update, and manage assistants
+- ✅ **Conversation Recall** - Agents remember long conversations past their history window
 - ✅ **Threads & Messages** - Create conversation threads and manage messages via REST
 - ✅ **Real-time WebSocket Chat** - Live streaming chat with automatic reconnection and run cancellation
 - ✅ **Organizations & Projects** - Manage orgs, projects, and webhooks
@@ -124,6 +126,26 @@ const agent = await ragwalla.agents.create({
   }
 });
 ```
+
+### Remember long conversations
+
+An agent with conversation recall searches the conversation's earlier messages on every turn and
+adds the ones that match to its context, so nothing said early in a long conversation is lost
+past the history window. Turn it on at create or at any time later:
+
+```typescript
+await ragwalla.agents.update(agent.id, {
+  conversationRecall: { enabled: true } // embeddingModel defaults to 'voyage-4'
+});
+
+const { conversationRecall } = await ragwalla.agents.retrieve(agent.id);
+// { state: 'enabling', embeddingModel: 'voyage-4', backfill: { done: 4210, total: 12000, paused: null } }
+```
+
+`state` is `off`, `enabling` (the conversations' earlier messages are being embedded; turns do not
+search yet), `on`, or `disabling` (what it stored is removed after 48 hours; turning it on again
+in that time keeps it). The embedding model is fixed while recall exists. Recall is metered on the
+vectors it stores and searches.
 
 ### Platform and owner instructions
 
@@ -228,7 +250,7 @@ const orchestrator = await ragwalla.agents.create({
   name: 'Coordinator',
   instructions: 'Coordinate work across child agents.',
   agentType: 'orchestrator',
-  executionMode: 'execution-only',
+  model: 'gpt-4o',
   systemSkillIds: ['create_subagent', 'teardown_subagent']
 });
 
@@ -294,7 +316,7 @@ Agents can delegate and be delegated to by default. Opt out at creation time:
 const isolated = await ragwalla.agents.create({
   name: 'Isolated Reviewer',
   instructions: 'Review the text you are given.',
-  executionMode: 'execution-only',
+  model: 'gpt-4o',
   canDelegate: false,
   canBeDelegatedTo: false,
 });
@@ -328,59 +350,6 @@ const kgs = await ragwalla.agents.listKnowledgeGraphs(agent.id);
 
 // Detach
 await ragwalla.agents.detachKnowledgeGraph(agent.id, kgId);
-```
-
-## Assistant Management
-
-### Create an Assistant
-
-```typescript
-const assistant = await ragwalla.assistants.create({
-  name: 'Math Tutor',
-  description: 'Helps users solve math problems',
-  model: 'gpt-4o',
-  instructions: 'You are a concise math tutor.',
-  tools: [
-    { type: 'code_interpreter' },
-    { type: 'file_search' }
-  ],
-  tool_resources: {
-    file_search: {
-      vector_store_ids: ['vs_123']
-    }
-  },
-  metadata: {
-    domain: 'education'
-  }
-});
-```
-
-### List Assistants
-
-```typescript
-const assistants = await ragwalla.assistants.list({
-  limit: 20,
-  order: 'desc'
-});
-
-console.log(assistants.data); // Array of assistants
-```
-
-### Update an Assistant
-
-```typescript
-const updatedAssistant = await ragwalla.assistants.update(assistant.id, {
-  instructions: 'Updated instructions for the assistant',
-  metadata: {
-    version: '2.0'
-  }
-});
-```
-
-### Delete an Assistant
-
-```typescript
-await ragwalla.assistants.delete(assistant.id);
 ```
 
 ## Real-time WebSocket Chat
@@ -1236,3 +1205,59 @@ For issues and questions:
 ## License
 
 MIT License
+
+## Legacy: OpenAI Assistants API
+
+`ragwalla.assistants` is kept for compatibility with the OpenAI Assistants API and is deprecated.
+New code uses agents, which hold the model, instructions, tools and memory themselves.
+
+#### Create an Assistant
+
+```typescript
+const assistant = await ragwalla.assistants.create({
+  name: 'Math Tutor',
+  description: 'Helps users solve math problems',
+  model: 'gpt-4o',
+  instructions: 'You are a concise math tutor.',
+  tools: [
+    { type: 'code_interpreter' },
+    { type: 'file_search' }
+  ],
+  tool_resources: {
+    file_search: {
+      vector_store_ids: ['vs_123']
+    }
+  },
+  metadata: {
+    domain: 'education'
+  }
+});
+```
+
+#### List Assistants
+
+```typescript
+const assistants = await ragwalla.assistants.list({
+  limit: 20,
+  order: 'desc'
+});
+
+console.log(assistants.data); // Array of assistants
+```
+
+#### Update an Assistant
+
+```typescript
+const updatedAssistant = await ragwalla.assistants.update(assistant.id, {
+  instructions: 'Updated instructions for the assistant',
+  metadata: {
+    version: '2.0'
+  }
+});
+```
+
+#### Delete an Assistant
+
+```typescript
+await ragwalla.assistants.delete(assistant.id);
+```

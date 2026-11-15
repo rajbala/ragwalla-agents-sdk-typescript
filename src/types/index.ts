@@ -92,6 +92,31 @@ export interface AudioFrame {
   error?: { code: string; message: string };
 }
 
+/**
+ * Conversation recall: the agent searches the conversation's earlier messages on every turn and
+ * adds the ones that match to its context, so a long conversation is not forgotten past the
+ * history window. `enabled` is the owner's decision; the agent's `conversationRecall.state` is
+ * where it is.
+ */
+export interface ConversationRecallSetting {
+  enabled: boolean;
+  /**
+   * The embedding model, on first enable only (default `voyage-4`). Fixed while recall exists; an
+   * agent that answers through an assistant uses the assistant's model.
+   */
+  embeddingModel?: string;
+}
+
+/** `off`, `enabling` (embedding earlier messages; turns do not search yet), `on`, `disabling`. */
+export type ConversationRecallState = 'off' | 'enabling' | 'on' | 'disabling';
+
+export interface ConversationRecall {
+  state: ConversationRecallState;
+  embeddingModel: string | null;
+  /** While enabling, once the earlier messages are counted. `paused` names why it waits, or null. */
+  backfill: { done: number; total: number; paused: string | null } | null;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -138,6 +163,7 @@ export interface Agent {
   subagentLifecycle?: SubagentLifecycleConfig;
   /** Absent: the agent has no speech. */
   voice?: AgentVoiceConfig;
+  conversationRecall?: ConversationRecall;
   created_at?: string;
   updated_at?: string;
 }
@@ -169,6 +195,10 @@ export interface CreateAgentRequest {
   topP?: number;
   maxTokens?: number;
   agentType?: 'orchestrator' | 'primary' | 'subagent';
+  /**
+   * @deprecated An agent with a model runs on it directly; recall is `conversationRecall`. Kept
+   * for agents that answer through a legacy assistant.
+   */
   executionMode?: 'assistant' | 'execution-only';
   /** Server default: true. */
   canDelegate?: boolean;
@@ -181,6 +211,8 @@ export interface CreateAgentRequest {
   memoryEmbeddingModel?: string;
   memoryUserScopingEnabled?: boolean;
   voice?: AgentVoiceConfig;
+  /** "Remember long conversations". */
+  conversationRecall?: ConversationRecallSetting;
 }
 
 export interface UpdateAgentRequest {
@@ -205,6 +237,10 @@ export interface UpdateAgentRequest {
   systemToolIds?: string[];
   metadata?: Record<string, any>;
   agentType?: 'orchestrator' | 'primary' | 'subagent';
+  /**
+   * @deprecated An agent with a model runs on it directly; recall is `conversationRecall`. Kept
+   * for agents that answer through a legacy assistant.
+   */
   executionMode?: 'assistant' | 'execution-only';
   canDelegate?: boolean;
   canBeDelegatedTo?: boolean;
@@ -215,6 +251,8 @@ export interface UpdateAgentRequest {
   memoryUserScopingEnabled?: boolean;
   /** `null` removes the agent's voice. */
   voice?: AgentVoiceConfig | null;
+  /** "Remember long conversations"; turning it off removes what it stored after 48 hours. */
+  conversationRecall?: ConversationRecallSetting;
 }
 
 export type AgentTool = Tool;

@@ -86,6 +86,7 @@ const normalizeUpdateRequest = (request: UpdateAssistantRequest) => {
   return body;
 };
 
+/** @deprecated Legacy OpenAI Assistants API compatibility. Use agents. */
 export class AssistantsResource {
   constructor(private client: HTTPClient) {}
 
