@@ -312,6 +312,35 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(audio).toHaveBeenCalledWith(part);
   });
 
+  it('emits narration for a line a spoken turn says while it works', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const narration = jest.fn();
+    client.on('narration', narration);
+
+    const line = { runId: 'run_1', threadId: 'thread_1', text: 'Let me look that up.', contentType: 'audio/mpeg', data: 'BwcH' };
+    FakeWebSocket.last.frame({ type: 'narration', ...line });
+
+    expect(narration).toHaveBeenCalledWith(line);
+  });
+
+  it('sends a dictated message as spoken, and audio as a message with no content', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const socket = FakeWebSocket.last;
+    const sentFrames = () => socket.sent.map((data: string) => JSON.parse(data)).filter((frame: any) => frame.type === 'message');
+
+    client.sendMessage({ role: 'user', content: 'What is the weather?', spoken: true });
+    client.sendAudio({ data: new Uint8Array([1, 2, 3]), format: 'm4a' }, { requestId: 'req_1' });
+    client.sendAudio({ fileId: 'file-1' }, { metadata: { source: 'mic' } });
+
+    const [dictated, inline, byId] = sentFrames();
+    expect(dictated).toMatchObject({ content: 'What is the weather?', spoken: true });
+    expect(inline).toMatchObject({ requestId: 'req_1', role: 'user', audio: { data: 'AQID', format: 'm4a' } });
+    expect(inline).not.toHaveProperty('content');
+    expect(byId).toMatchObject({ audio: { fileId: 'file-1' }, metadata: { source: 'mic' } });
+  });
+
   it('passes a thread_event frame missing its fields to rawMessage, not threadEvent', async () => {
     const client = newClient();
     await connectOpen(client);

@@ -10,6 +10,8 @@ import {
   type RunUsageTotals,
   type ThreadEventFrame,
   type AudioFrame,
+  type NarrationFrame,
+  type TurnAudioInput,
   type TokenUsageEvent,
 } from '../types/index.js';
 import { DEFAULT_BASE_URL } from './base-url.js';
@@ -604,6 +606,7 @@ export class RagwallaWebSocket {
       content: message.content,
       role: message.role,
       timestamp: new Date().toISOString(),
+      ...(message.spoken !== undefined && { spoken: message.spoken }),
       ...(message.metadata && { metadata: message.metadata }),
       ...(this.truncationStrategy && { truncationStrategy: this.truncationStrategy }),
       ...(this.maxKbCharsPerChunk !== undefined && { maxKbCharsPerChunk: this.maxKbCharsPerChunk }),
@@ -892,6 +895,35 @@ export class RagwallaWebSocket {
     await this.ensureConnectedForSend();
     this.log('info', 'Sending WebSocket message', { payload });
     this.sendPayload(payload, message);
+  }
+
+  /**
+   * Send the user's speech as a turn: the agent transcribes it with its `voice.transcription`
+   * model, stores the transcript as the user message and answers it as a spoken turn, in its
+   * voice where its voice replies `when_spoken_to` or `always`. A failed transcription is an
+   * `error` with its code (`transcription_not_configured`, `transcription_failed`, ...) and
+   * stores nothing.
+   */
+  sendAudio(audio: TurnAudioInput, options?: WebSocketRequestOptions & { metadata?: Record<string, any> }): void {
+    const payload = this.buildAudioPayload(audio, options);
+    this.log('info', 'Sending WebSocket audio message', { requestId: options?.requestId });
+    this.sendPayload(payload, payload);
+  }
+
+  /** As sendAudio, reconnecting first if needed. */
+  async sendAudioAsync(audio: TurnAudioInput, options?: WebSocketRequestOptions & { metadata?: Record<string, any> }): Promise<void> {
+    const payload = this.buildAudioPayload(audio, options);
+    await this.ensureConnectedForSend();
+    this.log('info', 'Sending WebSocket audio message', { requestId: options?.requestId });
+    this.sendPayload(payload, payload);
+  }
+
+  private buildAudioPayload(audio: TurnAudioInput, options?: WebSocketRequestOptions & { metadata?: Record<string, any> }): Record<string, any> {
+    const { content: _content, ...rest } = this.buildMessagePayload(
+      { role: 'user', content: '', ...(options?.metadata && { metadata: options.metadata }) },
+      options,
+    );
+    return { ...rest, audio: 'fileId' in audio ? { fileId: audio.fileId } : { data: audioBase64(audio.data), format: audio.format } };
   }
 
   /**
@@ -1689,14 +1721,30 @@ export class RagwallaWebSocket {
         break;
       }
       case 'audio': {
-        // A part of an agent's spoken answer (its voice's reply_with_audio: 'always').
+        // A part of an agent's spoken answer (its voice's reply_with_audio).
         const frame = message as unknown as AudioFrame & { type: 'audio' };
         const { type: _type, ...audio } = frame;
         emit('audio', audio);
+        break;
+      }
+      case 'narration': {
+        // A line a spoken turn says while its tools run, its audio inline.
+        const { type: _type, ...narration } = message as unknown as NarrationFrame & { type: 'narration' };
+        emit('narration', narration);
         break;
       }
       default:
         emit('rawMessage', message);
     }
   }
+}
+
+function audioBase64(data: Uint8Array | ArrayBuffer | string): string {
+  if (typeof data === 'string') return data;
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return btoa(binary);
 }
