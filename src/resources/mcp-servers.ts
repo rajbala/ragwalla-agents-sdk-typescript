@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   MCPServer,
   CreateMCPServerRequest,
@@ -34,21 +35,21 @@ export class MCPServersResource {
    * Retrieve a specific MCP server by ID
    */
   async retrieve(serverId: string): Promise<MCPServer> {
-    return this.client.get<MCPServer>(`/v1/mcp-servers/${serverId}`);
+    return this.client.get<MCPServer>(path`/v1/mcp-servers/${serverId}`);
   }
 
   /**
    * Update an MCP server configuration
    */
   async update(serverId: string, request: UpdateMCPServerRequest): Promise<{ success: boolean }> {
-    return this.client.put<{ success: boolean }>(`/v1/mcp-servers/${serverId}`, request);
+    return this.client.put<{ success: boolean }>(path`/v1/mcp-servers/${serverId}`, request);
   }
 
   /**
    * Delete an MCP server
    */
   async delete(serverId: string): Promise<{ success: boolean }> {
-    return this.client.delete<{ success: boolean }>(`/v1/mcp-servers/${serverId}`);
+    return this.client.delete<{ success: boolean }>(path`/v1/mcp-servers/${serverId}`);
   }
 
   /**
@@ -56,7 +57,7 @@ export class MCPServersResource {
    * Connects to the server, lists tools, and caches the results.
    */
   async discoverTools(serverId: string): Promise<MCPDiscoverResponse> {
-    return this.client.post<MCPDiscoverResponse>(`/v1/mcp-servers/${serverId}/discover`);
+    return this.client.post<MCPDiscoverResponse>(path`/v1/mcp-servers/${serverId}/discover`);
   }
 
   /**
@@ -71,41 +72,41 @@ export class MCPServersResource {
    * Start OAuth (authorization code) flow for an MCP server.
    */
   async startOAuth(serverId: string, redirectUri?: string): Promise<MCPOAuthStartResponse> {
-    return this.client.post<MCPOAuthStartResponse>(`/v1/mcp-servers/${serverId}/oauth/start`, redirectUri ? { redirect_uri: redirectUri } : {});
+    return this.client.post<MCPOAuthStartResponse>(path`/v1/mcp-servers/${serverId}/oauth/start`, redirectUri ? { redirect_uri: redirectUri } : {});
   }
 
   /**
    * Get OAuth connection status for an MCP server.
    */
   async oauthStatus(serverId: string): Promise<MCPOAuthStatusResponse> {
-    return this.client.get<MCPOAuthStatusResponse>(`/v1/mcp-servers/${serverId}/oauth/status`);
+    return this.client.get<MCPOAuthStatusResponse>(path`/v1/mcp-servers/${serverId}/oauth/status`);
   }
 
   /**
    * Refresh OAuth token for an MCP server.
    */
   async refreshOAuth(serverId: string): Promise<MCPOAuthRefreshResponse> {
-    return this.client.post<MCPOAuthRefreshResponse>(`/v1/mcp-servers/${serverId}/oauth/refresh`);
+    return this.client.post<MCPOAuthRefreshResponse>(path`/v1/mcp-servers/${serverId}/oauth/refresh`);
   }
 
   /**
    * Revoke OAuth credentials for an MCP server.
    */
   async revokeOAuth(serverId: string): Promise<{ success: boolean }> {
-    return this.client.post<{ success: boolean }>(`/v1/mcp-servers/${serverId}/oauth/revoke`);
+    return this.client.post<{ success: boolean }>(path`/v1/mcp-servers/${serverId}/oauth/revoke`);
   }
 
   /**
    * Grant or revoke an agent's access to an MCP server
    */
   async grantAgentAccess(serverId: string, request: GrantAgentAccessRequest): Promise<{ success: boolean }> {
-    return this.client.post<{ success: boolean }>(`/v1/mcp-servers/${serverId}/access`, request);
+    return this.client.post<{ success: boolean }>(path`/v1/mcp-servers/${serverId}/access`, request);
   }
 
   /**
    * List agents that have access to an MCP server
    */
   async listAgentAccess(serverId: string): Promise<{ access: MCPAgentAccess[] }> {
-    return this.client.get<{ access: MCPAgentAccess[] }>(`/v1/mcp-servers/${serverId}/access`);
+    return this.client.get<{ access: MCPAgentAccess[] }>(path`/v1/mcp-servers/${serverId}/access`);
   }
 }

@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   VectorSearchRequest,
   VectorSearchResponse,
@@ -16,7 +17,7 @@ export class VectorStoresResource {
   private searchPath(vectorStoreId: string, options?: VectorSearchOptions): string {
     const pageToken = options?.page_token;
     const query = pageToken ? `?page_token=${encodeURIComponent(pageToken)}` : '';
-    return `/v1/vector_stores/${vectorStoreId}/search${query}`;
+    return path`/v1/vector_stores/${vectorStoreId}/search` + query;
   }
 
   /**
@@ -50,7 +51,7 @@ export class VectorStoresResource {
     vectorStoreId: string,
     request: CreateVectorStoreFileRequest
   ): Promise<VectorStoreFile> {
-    return this.client.post<VectorStoreFile>(`/v1/vector_stores/${vectorStoreId}/files`, request);
+    return this.client.post<VectorStoreFile>(path`/v1/vector_stores/${vectorStoreId}/files`, request);
   }
 
   /**
@@ -63,21 +64,21 @@ export class VectorStoresResource {
     before?: string;
     filter?: 'in_progress' | 'completed' | 'failed' | 'cancelled';
   }): Promise<VectorStoreFileListResponse> {
-    return this.client.get<VectorStoreFileListResponse>(`/v1/vector_stores/${vectorStoreId}/files`, params);
+    return this.client.get<VectorStoreFileListResponse>(path`/v1/vector_stores/${vectorStoreId}/files`, params);
   }
 
   /**
    * Retrieve a file's status within a vector store
    */
   async retrieveFile(vectorStoreId: string, fileId: string): Promise<VectorStoreFile> {
-    return this.client.get<VectorStoreFile>(`/v1/vector_stores/${vectorStoreId}/files/${fileId}`);
+    return this.client.get<VectorStoreFile>(path`/v1/vector_stores/${vectorStoreId}/files/${fileId}`);
   }
 
   /**
    * Remove a file from a vector store
    */
   async removeFile(vectorStoreId: string, fileId: string): Promise<VectorStoreFileDeleted> {
-    return this.client.delete<VectorStoreFileDeleted>(`/v1/vector_stores/${vectorStoreId}/files/${fileId}`);
+    return this.client.delete<VectorStoreFileDeleted>(path`/v1/vector_stores/${vectorStoreId}/files/${fileId}`);
   }
 
   /**
@@ -89,7 +90,7 @@ export class VectorStoresResource {
     include_values?: boolean;
   }): Promise<VectorStoreFileVectorsResponse> {
     return this.client.get<VectorStoreFileVectorsResponse>(
-      `/v1/vector_stores/${vectorStoreId}/files/${fileId}/vectors`,
+      path`/v1/vector_stores/${vectorStoreId}/files/${fileId}/vectors`,
       params
     );
   }

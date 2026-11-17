@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   Endpoint,
   CreateEndpointRequest,
@@ -34,13 +35,13 @@ export class EndpointsResource {
    * Retrieve an endpoint by ID. Use this to poll provisioning status.
    */
   async retrieve(endpointId: string): Promise<Endpoint> {
-    return this.client.get<Endpoint>(`/v1/endpoints/${endpointId}`);
+    return this.client.get<Endpoint>(path`/v1/endpoints/${endpointId}`);
   }
 
   /**
    * Delete (deprovision) an endpoint.
    */
   async delete(endpointId: string): Promise<EndpointDeleted> {
-    return this.client.delete<EndpointDeleted>(`/v1/endpoints/${endpointId}`);
+    return this.client.delete<EndpointDeleted>(path`/v1/endpoints/${endpointId}`);
   }
 }

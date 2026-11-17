@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   CreateOrganizationRequest,
   Organization,
@@ -23,7 +24,7 @@ class ProjectsResource {
    * Create a new project within an organization
    */
   async create(orgId: string, request: CreateProjectRequest): Promise<Project> {
-    return this.client.post<Project>(`/v1/organizations/${orgId}/projects`, request);
+    return this.client.post<Project>(path`/v1/organizations/${orgId}/projects`, request);
   }
 
   /**
@@ -33,28 +34,28 @@ class ProjectsResource {
     limit?: number;
     after?: string;
   }): Promise<ProjectList> {
-    return this.client.get<ProjectList>(`/v1/organizations/${orgId}/projects`, params);
+    return this.client.get<ProjectList>(path`/v1/organizations/${orgId}/projects`, params);
   }
 
   /**
    * Retrieve a project by ID
    */
   async retrieve(orgId: string, projectId: string): Promise<Project> {
-    return this.client.get<Project>(`/v1/organizations/${orgId}/projects/${projectId}`);
+    return this.client.get<Project>(path`/v1/organizations/${orgId}/projects/${projectId}`);
   }
 
   /**
    * Update a project
    */
   async update(orgId: string, projectId: string, request: UpdateProjectRequest): Promise<Project> {
-    return this.client.post<Project>(`/v1/organizations/${orgId}/projects/${projectId}`, request);
+    return this.client.post<Project>(path`/v1/organizations/${orgId}/projects/${projectId}`, request);
   }
 
   /**
    * Archive a project
    */
   async archive(orgId: string, projectId: string): Promise<Project> {
-    return this.client.post<Project>(`/v1/organizations/${orgId}/projects/${projectId}/archive`);
+    return this.client.post<Project>(path`/v1/organizations/${orgId}/projects/${projectId}/archive`);
   }
 }
 
@@ -69,7 +70,7 @@ class WebhooksResource {
     request: CreateOrganizationWebhookRequest,
   ): Promise<OrganizationWebhookCreateResponse> {
     return this.client.post<OrganizationWebhookCreateResponse>(
-      `/v1/organizations/${orgId}/webhooks`,
+      path`/v1/organizations/${orgId}/webhooks`,
       request,
     );
   }
@@ -79,7 +80,7 @@ class WebhooksResource {
    */
   async list(orgId: string): Promise<OrganizationWebhookListResponse> {
     return this.client.get<OrganizationWebhookListResponse>(
-      `/v1/organizations/${orgId}/webhooks`,
+      path`/v1/organizations/${orgId}/webhooks`,
     );
   }
 
@@ -88,7 +89,7 @@ class WebhooksResource {
    */
   async retrieve(orgId: string, webhookId: string): Promise<OrganizationWebhook> {
     return this.client.get<OrganizationWebhook>(
-      `/v1/organizations/${orgId}/webhooks/${webhookId}`,
+      path`/v1/organizations/${orgId}/webhooks/${webhookId}`,
     );
   }
 
@@ -101,7 +102,7 @@ class WebhooksResource {
     request: UpdateOrganizationWebhookRequest,
   ): Promise<OrganizationWebhook> {
     return this.client.put<OrganizationWebhook>(
-      `/v1/organizations/${orgId}/webhooks/${webhookId}`,
+      path`/v1/organizations/${orgId}/webhooks/${webhookId}`,
       request,
     );
   }
@@ -111,7 +112,7 @@ class WebhooksResource {
    */
   async delete(orgId: string, webhookId: string): Promise<{ ok: boolean }> {
     return this.client.delete<{ ok: boolean }>(
-      `/v1/organizations/${orgId}/webhooks/${webhookId}`,
+      path`/v1/organizations/${orgId}/webhooks/${webhookId}`,
     );
   }
 
@@ -124,7 +125,7 @@ class WebhooksResource {
     params?: { limit?: number; offset?: number },
   ): Promise<OrganizationWebhookDeliveriesResponse> {
     return this.client.get<OrganizationWebhookDeliveriesResponse>(
-      `/v1/organizations/${orgId}/webhooks/${webhookId}/deliveries`,
+      path`/v1/organizations/${orgId}/webhooks/${webhookId}/deliveries`,
       params,
     );
   }
@@ -157,20 +158,20 @@ export class OrganizationsResource {
    * Retrieve an organization by ID
    */
   async retrieve(orgId: string): Promise<Organization> {
-    return this.client.get<Organization>(`/v1/organizations/${orgId}`);
+    return this.client.get<Organization>(path`/v1/organizations/${orgId}`);
   }
 
   /**
    * Update an organization
    */
   async update(orgId: string, request: UpdateOrganizationRequest): Promise<Organization> {
-    return this.client.patch<Organization>(`/v1/organizations/${orgId}`, request);
+    return this.client.patch<Organization>(path`/v1/organizations/${orgId}`, request);
   }
 
   /**
    * Delete an organization
    */
   async delete(orgId: string): Promise<{ ok: boolean }> {
-    return this.client.delete<{ ok: boolean }>(`/v1/organizations/${orgId}`);
+    return this.client.delete<{ ok: boolean }>(path`/v1/organizations/${orgId}`);
   }
 }

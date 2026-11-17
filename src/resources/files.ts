@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   FileObject,
   FileListResponse,
@@ -36,7 +37,7 @@ export class FilesResource {
    * Retrieve a file by ID
    */
   async retrieve(fileId: string): Promise<FileObject> {
-    return this.client.get<FileObject>(`/v1/files/${fileId}`);
+    return this.client.get<FileObject>(path`/v1/files/${fileId}`);
   }
 
   /**
@@ -55,6 +56,6 @@ export class FilesResource {
    * Delete a file
    */
   async delete(fileId: string): Promise<FileDeleted> {
-    return this.client.delete<FileDeleted>(`/v1/files/${fileId}`);
+    return this.client.delete<FileDeleted>(path`/v1/files/${fileId}`);
   }
 }

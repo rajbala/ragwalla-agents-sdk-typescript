@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   Channel,
   CreateChannelRequest,
@@ -15,14 +16,14 @@ export class ChannelsResource {
    * If a channel of the same type already exists for the agent, it will be updated.
    */
   async create(agentId: string, request: CreateChannelRequest): Promise<CreateChannelResponse> {
-    return this.client.post<CreateChannelResponse>(`/v1/agents/${agentId}/channels`, request);
+    return this.client.post<CreateChannelResponse>(path`/v1/agents/${agentId}/channels`, request);
   }
 
   /**
    * List all channels configured for an agent
    */
   async list(agentId: string): Promise<{ channels: Channel[] }> {
-    return this.client.get<{ channels: Channel[] }>(`/v1/agents/${agentId}/channels`);
+    return this.client.get<{ channels: Channel[] }>(path`/v1/agents/${agentId}/channels`);
   }
 
   /**
@@ -30,20 +31,20 @@ export class ChannelsResource {
    * For Telegram channels, this also unregisters the webhook.
    */
   async delete(agentId: string, channelId: string): Promise<{ deleted: boolean }> {
-    return this.client.delete<{ deleted: boolean }>(`/v1/agents/${agentId}/channels/${channelId}`);
+    return this.client.delete<{ deleted: boolean }>(path`/v1/agents/${agentId}/channels/${channelId}`);
   }
 
   /**
    * Get detailed status of a channel, including live webhook status for Telegram
    */
   async getStatus(agentId: string, channelId: string): Promise<ChannelStatus> {
-    return this.client.get<ChannelStatus>(`/v1/agents/${agentId}/channels/${channelId}/status`);
+    return this.client.get<ChannelStatus>(path`/v1/agents/${agentId}/channels/${channelId}/status`);
   }
 
   /**
    * Retry webhook registration for a failed Telegram channel
    */
   async retryWebhook(agentId: string, channelId: string): Promise<WebhookRetryResponse> {
-    return this.client.post<WebhookRetryResponse>(`/v1/agents/${agentId}/channels/${channelId}/webhook/retry`);
+    return this.client.post<WebhookRetryResponse>(path`/v1/agents/${agentId}/channels/${channelId}/webhook/retry`);
   }
 }
