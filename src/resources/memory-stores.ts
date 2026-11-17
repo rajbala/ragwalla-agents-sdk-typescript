@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   MemoryStore,
   CreateMemoryStoreRequest,
@@ -24,7 +25,7 @@ export class MemoryStoresResource {
    * Retrieve a memory store by ID.
    */
   async retrieve(storeId: string): Promise<MemoryStore> {
-    return this.client.get<MemoryStore>(`/v1/memory_stores/${storeId}`);
+    return this.client.get<MemoryStore>(path`/v1/memory_stores/${storeId}`);
   }
 
   /**
@@ -38,34 +39,34 @@ export class MemoryStoresResource {
    * Update a memory store.
    */
   async update(storeId: string, request: UpdateMemoryStoreRequest): Promise<MemoryStore> {
-    return this.client.put<MemoryStore>(`/v1/memory_stores/${storeId}`, request);
+    return this.client.put<MemoryStore>(path`/v1/memory_stores/${storeId}`, request);
   }
 
   /**
    * Delete a memory store. Fails if agents are still attached.
    */
   async delete(storeId: string): Promise<{ deleted: boolean; id: string }> {
-    return this.client.delete<{ deleted: boolean; id: string }>(`/v1/memory_stores/${storeId}`);
+    return this.client.delete<{ deleted: boolean; id: string }>(path`/v1/memory_stores/${storeId}`);
   }
 
   /**
    * Attach a memory store to an agent.
    */
   async attachToAgent(agentId: string, request: AttachMemoryStoreRequest): Promise<MemoryStoreAttachment> {
-    return this.client.post<MemoryStoreAttachment>(`/v1/agents/${agentId}/memory_stores`, request);
+    return this.client.post<MemoryStoreAttachment>(path`/v1/agents/${agentId}/memory_stores`, request);
   }
 
   /**
    * List memory stores attached to an agent.
    */
   async listForAgent(agentId: string): Promise<ListMemoryStoreAttachmentsResponse> {
-    return this.client.get<ListMemoryStoreAttachmentsResponse>(`/v1/agents/${agentId}/memory_stores`);
+    return this.client.get<ListMemoryStoreAttachmentsResponse>(path`/v1/agents/${agentId}/memory_stores`);
   }
 
   /**
    * Detach a memory store from an agent.
    */
   async detachFromAgent(agentId: string, storeId: string): Promise<{ agent_id: string; memory_store_id: string; deleted: boolean }> {
-    return this.client.delete<{ agent_id: string; memory_store_id: string; deleted: boolean }>(`/v1/agents/${agentId}/memory_stores/${storeId}`);
+    return this.client.delete<{ agent_id: string; memory_store_id: string; deleted: boolean }>(path`/v1/agents/${agentId}/memory_stores/${storeId}`);
   }
 }

@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   KnowledgeGraph,
   CreateKnowledgeGraphRequest,
@@ -39,14 +40,14 @@ export class KnowledgeGraphsResource {
    * Retrieve a knowledge graph by ID
    */
   async retrieve(kgId: string): Promise<KnowledgeGraph> {
-    return this.client.get<KnowledgeGraph>(`/v1/knowledge_graphs/${kgId}`);
+    return this.client.get<KnowledgeGraph>(path`/v1/knowledge_graphs/${kgId}`);
   }
 
   /**
    * Update a knowledge graph
    */
   async update(kgId: string, request: UpdateKnowledgeGraphRequest): Promise<KnowledgeGraph> {
-    return this.client.post<KnowledgeGraph>(`/v1/knowledge_graphs/${kgId}`, request);
+    return this.client.post<KnowledgeGraph>(path`/v1/knowledge_graphs/${kgId}`, request);
   }
 
   /**
@@ -57,7 +58,7 @@ export class KnowledgeGraphsResource {
     request: SuggestKnowledgeGraphSchemaRequest = {}
   ): Promise<SuggestKnowledgeGraphSchemaResponse> {
     return this.client.post<SuggestKnowledgeGraphSchemaResponse>(
-      `/v1/knowledge_graphs/${kgId}/schema/suggest`,
+      path`/v1/knowledge_graphs/${kgId}/schema/suggest`,
       request
     );
   }
@@ -66,14 +67,14 @@ export class KnowledgeGraphsResource {
    * Delete a knowledge graph
    */
   async delete(kgId: string): Promise<{ id: string; deleted: boolean }> {
-    return this.client.delete<{ id: string; deleted: boolean }>(`/v1/knowledge_graphs/${kgId}`);
+    return this.client.delete<{ id: string; deleted: boolean }>(path`/v1/knowledge_graphs/${kgId}`);
   }
 
   /**
    * Get infrastructure provisioning status for a knowledge graph
    */
   async getStatus(kgId: string): Promise<KgInfrastructureStatus> {
-    return this.client.get<KgInfrastructureStatus>(`/v1/knowledge_graphs/${kgId}/status`);
+    return this.client.get<KgInfrastructureStatus>(path`/v1/knowledge_graphs/${kgId}/status`);
   }
 
   // ── File management ───────────────────────────────────────────────────
@@ -82,7 +83,7 @@ export class KnowledgeGraphsResource {
    * Add a file to a knowledge graph (triggers extraction)
    */
   async addFile(kgId: string, request: { file_id: string }): Promise<KgFileAssociation> {
-    return this.client.post<KgFileAssociation>(`/v1/knowledge_graphs/${kgId}/files`, request);
+    return this.client.post<KgFileAssociation>(path`/v1/knowledge_graphs/${kgId}/files`, request);
   }
 
   /**
@@ -92,7 +93,7 @@ export class KnowledgeGraphsResource {
     limit?: number;
     offset?: number;
   }): Promise<{ object: 'list'; data: KgFileAssociation[]; total: number; limit: number; offset: number }> {
-    return this.client.get<{ object: 'list'; data: KgFileAssociation[]; total: number; limit: number; offset: number }>(`/v1/knowledge_graphs/${kgId}/files`, params);
+    return this.client.get<{ object: 'list'; data: KgFileAssociation[]; total: number; limit: number; offset: number }>(path`/v1/knowledge_graphs/${kgId}/files`, params);
   }
 
   /**
@@ -101,14 +102,14 @@ export class KnowledgeGraphsResource {
   async getFile(kgId: string, fileId: string, params?: {
     include_materialized?: boolean;
   }): Promise<KgFileAssociation> {
-    return this.client.get<KgFileAssociation>(`/v1/knowledge_graphs/${kgId}/files/${fileId}`, params);
+    return this.client.get<KgFileAssociation>(path`/v1/knowledge_graphs/${kgId}/files/${fileId}`, params);
   }
 
   /**
    * Remove a file from a knowledge graph
    */
   async removeFile(kgId: string, fileId: string): Promise<{ deleted: boolean }> {
-    return this.client.delete<{ deleted: boolean }>(`/v1/knowledge_graphs/${kgId}/files/${fileId}`);
+    return this.client.delete<{ deleted: boolean }>(path`/v1/knowledge_graphs/${kgId}/files/${fileId}`);
   }
 
   // ── Entity & relationship browsing ────────────────────────────────────
@@ -122,7 +123,7 @@ export class KnowledgeGraphsResource {
     offset?: number;
   }): Promise<{ data: KgEntity[]; total: number; limit: number; offset: number }> {
     return this.client.get<{ data: KgEntity[]; total: number; limit: number; offset: number }>(
-      `/v1/knowledge_graphs/${kgId}/entities`, params
+      path`/v1/knowledge_graphs/${kgId}/entities`, params
     );
   }
 
@@ -130,14 +131,14 @@ export class KnowledgeGraphsResource {
    * Get an entity by ID
    */
   async getEntity(kgId: string, entityId: string): Promise<KgEntity> {
-    return this.client.get<KgEntity>(`/v1/knowledge_graphs/${kgId}/entities/${entityId}`);
+    return this.client.get<KgEntity>(path`/v1/knowledge_graphs/${kgId}/entities/${entityId}`);
   }
 
   /**
    * Delete an entity
    */
   async deleteEntity(kgId: string, entityId: string): Promise<{ deleted: boolean }> {
-    return this.client.delete<{ deleted: boolean }>(`/v1/knowledge_graphs/${kgId}/entities/${entityId}`);
+    return this.client.delete<{ deleted: boolean }>(path`/v1/knowledge_graphs/${kgId}/entities/${entityId}`);
   }
 
   /**
@@ -151,7 +152,7 @@ export class KnowledgeGraphsResource {
     offset?: number;
   }): Promise<{ data: KgRelationship[]; total: number; limit: number; offset: number }> {
     return this.client.get<{ data: KgRelationship[]; total: number; limit: number; offset: number }>(
-      `/v1/knowledge_graphs/${kgId}/relationships`, params
+      path`/v1/knowledge_graphs/${kgId}/relationships`, params
     );
   }
 
@@ -161,13 +162,13 @@ export class KnowledgeGraphsResource {
    * Semantic search for entities
    */
   async search(kgId: string, request: KgSearchRequest): Promise<KgSearchResponse> {
-    return this.client.post<KgSearchResponse>(`/v1/knowledge_graphs/${kgId}/search`, request);
+    return this.client.post<KgSearchResponse>(path`/v1/knowledge_graphs/${kgId}/search`, request);
   }
 
   /**
    * Graph-aware query (decompose → traverse → context)
    */
   async query(kgId: string, request: KgQueryRequest): Promise<KgQueryResponse> {
-    return this.client.post<KgQueryResponse>(`/v1/knowledge_graphs/${kgId}/query`, request);
+    return this.client.post<KgQueryResponse>(path`/v1/knowledge_graphs/${kgId}/query`, request);
   }
 }

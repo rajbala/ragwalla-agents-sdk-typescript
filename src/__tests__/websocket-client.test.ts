@@ -265,6 +265,24 @@ describe('where the socket connects', () => {
     await connectOpen(new RagwallaWebSocket({ baseURL: 'https://acme.ragwalla.ai.ragwalla.com/v1', reconnectAttempts: 0 }));
     expect(connectedTo()).toBe('wss://acme.ragwalla.ai.ragwalla.com/v1/agents/agent/conn');
   });
+
+  it('encodes the agent and connection ids, so neither can change the route or its query', () => {
+    const client = newClient();
+    void client.connect('../x', 'c?token=attacker#', 'tok').catch(() => {});
+    const url = new URL(FakeWebSocket.last.url);
+    expect(url.pathname).toBe('/v1/agents/..%2Fx/c%3Ftoken%3Dattacker%23');
+    expect(url.searchParams.getAll('token')).toEqual(['tok']);
+  });
+
+  it('does not log the token in debug mode', () => {
+    const info = jest.spyOn(console, 'info').mockImplementation(() => {});
+    const client = new RagwallaWebSocket({ baseURL: BASE, reconnectAttempts: 0, debug: true });
+    void client.connect('agent', 'conn', 'secret-token-value').catch(() => {});
+    const logged = JSON.stringify(info.mock.calls);
+    info.mockRestore();
+    expect(logged).toContain('/agents/agent/conn');
+    expect(logged).not.toContain('secret-token-value');
+  });
 });
 
 describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
