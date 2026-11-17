@@ -45,8 +45,10 @@ export interface AgentChild {
 
 /**
  * An agent's voice: the speech model, voice and output format its answers and its `speak_text`
- * tool are synthesized in, checked against the endpoint's speech catalogue when saved, and
- * whether its answers are spoken (`always`) or not (`never`, the voice is then the tool's alone).
+ * tool are synthesized in, checked against the endpoint's speech catalogue when saved; the model
+ * a spoken turn's audio is transcribed with; and when its answers are spoken: `always`,
+ * `when_spoken_to` (only a turn whose input was spoken: audio sent with `sendAudio`, or a message
+ * sent with `spoken: true`), or `never` (the voice is then the tool's alone).
  */
 export interface AgentVoiceConfig {
   speech: {
@@ -56,7 +58,38 @@ export interface AgentVoiceConfig {
     voice: string;
     format: SpeechFormat;
   };
-  reply_with_audio: 'always' | 'never';
+  /** The model audio input is transcribed with (`gpt-transcribe`); without it the agent refuses audio. */
+  transcription?: {
+    model: string;
+    /** An ISO-639-1 hint, e.g. `en`. */
+    language?: string;
+  };
+  reply_with_audio: ReplyWithAudio;
+}
+
+export type ReplyWithAudio = 'always' | 'when_spoken_to' | 'never';
+
+/** The containers a turn's audio may be sent in. */
+export type TurnAudioFormat = 'mp3' | 'wav' | 'webm' | 'ogg' | 'm4a' | 'mp4' | 'flac';
+
+/**
+ * A turn's audio input, transcribed by the agent's `voice.transcription` model: a file of the
+ * agent's project (uploaded with `files.create`), or the audio inline, at most 25 MB.
+ */
+export type TurnAudioInput =
+  | { fileId: string }
+  | { data: Uint8Array | ArrayBuffer | string; format: TurnAudioFormat };
+
+/**
+ * A line a spoken turn says while its tools run (progress narration): heard once, live, and
+ * stored nowhere. Its audio is inline, base64.
+ */
+export interface NarrationFrame {
+  runId: string;
+  threadId: string;
+  text: string;
+  contentType: string;
+  data: string;
 }
 
 /** The output formats a speech model may produce (each model lists its own). */
@@ -777,6 +810,11 @@ export interface GrantAgentAccessRequest {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /**
+   * The user spoke this text (dictation on the device). The turn is then a spoken one, which an
+   * agent whose voice replies `when_spoken_to` answers in its voice. Sent on socket messages only.
+   */
+  spoken?: boolean;
   metadata?: Record<string, any>;
   timestamp?: string;
 }
@@ -1013,7 +1051,7 @@ export type KnownWebSocketMessageType =
   'connection_status' | 'connected' | 'cf_agent_state' |
   'run_paused' | 'run_cancelled' | 'continuation_mode_updated' | 'continue_run_result' |
   'status' | 'tool_executing' | 'tool_complete' | 'resume' | 'run_state' | 'run_started' | 'request_ack' | 'pong' |
-  'message_received' | 'thread_event' | 'audio';
+  'message_received' | 'thread_event' | 'audio' | 'narration';
 
 export type WebSocketMessageType = KnownWebSocketMessageType | (string & {});
 
