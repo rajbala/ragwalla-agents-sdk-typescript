@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   Agent,
   AgentChild,
@@ -64,7 +65,7 @@ export class AgentsResource {
    * Retrieve an agent by ID
    */
   async retrieve(agentId: string): Promise<Agent> {
-    return this.client.get<Agent>(`/v1/agents/${agentId}`);
+    return this.client.get<Agent>(path`/v1/agents/${agentId}`);
   }
 
   /**
@@ -84,7 +85,7 @@ export class AgentsResource {
    */
   async update(agentId: string, request: UpdateAgentRequest): Promise<Agent> {
     return this.client.put<Agent>(
-      `/v1/agents/${agentId}`,
+      path`/v1/agents/${agentId}`,
       this.normalizeSystemSkillProvisioning(request)
     );
   }
@@ -93,7 +94,7 @@ export class AgentsResource {
    * Delete an agent
    */
   async delete(agentId: string): Promise<{ id: string; object: 'agent'; deleted: boolean }> {
-    return this.client.delete<{ id: string; object: 'agent'; deleted: boolean }>(`/v1/agents/${agentId}`);
+    return this.client.delete<{ id: string; object: 'agent'; deleted: boolean }>(path`/v1/agents/${agentId}`);
   }
 
   /**
@@ -115,7 +116,7 @@ export class AgentsResource {
     agentId: string,
     params?: { type?: ToolType }
   ): Promise<{ object: 'list'; data: AgentToolGrant[] }> {
-    return this.client.get<{ object: 'list'; data: AgentToolGrant[] }>(`/v1/agents/${agentId}/tools`, params);
+    return this.client.get<{ object: 'list'; data: AgentToolGrant[] }>(path`/v1/agents/${agentId}/tools`, params);
   }
 
   /** @deprecated Use listSkills() instead */
@@ -130,7 +131,7 @@ export class AgentsResource {
    * Attach a skill to an agent
    */
   async attachSkill(agentId: string, skill: Partial<Tool>): Promise<Tool> {
-    const response = await this.client.post<any>(`/v1/agents/${agentId}/tools`, skill);
+    const response = await this.client.post<any>(path`/v1/agents/${agentId}/tools`, skill);
     return this.unwrapToolResponse(response);
   }
 
@@ -155,7 +156,7 @@ export class AgentsResource {
     skill: Partial<Tool>,
     access: ToolAccess
   ): Promise<AttachSkillWithAccessResponse> {
-    const response = await this.client.post<AttachSkillWithAccessResponse>(`/v1/agents/${agentId}/tools`, { ...skill, access });
+    const response = await this.client.post<AttachSkillWithAccessResponse>(path`/v1/agents/${agentId}/tools`, { ...skill, access });
     if (response.access === undefined) {
       throw new Error(
         `The server granted skill ${response.id} to agent ${agentId} without the requested access: `
@@ -178,7 +179,7 @@ export class AgentsResource {
     // Which items asked for access, as they were sent.
     const askedForAccess = new Set(skills.flatMap((skill, index) => skill.access === undefined ? [] : [index]));
     const response = await this.client.post<BulkAttachSkillsResponse>(
-      `/v1/agents/${agentId}/tools/bulk-attach`,
+      path`/v1/agents/${agentId}/tools/bulk-attach`,
       { skills }
     );
     // A server that predates access on attach strips it: it grants the skill at the default, or
@@ -205,7 +206,7 @@ export class AgentsResource {
    * Update an existing skill on an agent
    */
   async updateSkill(agentId: string, skillId: string, updates: Partial<Tool>): Promise<Tool> {
-    const response = await this.client.put<any>(`/v1/agents/${agentId}/tools/${skillId}`, updates);
+    const response = await this.client.put<any>(path`/v1/agents/${agentId}/tools/${skillId}`, updates);
     return this.unwrapToolResponse(response);
   }
 
@@ -228,14 +229,14 @@ export class AgentsResource {
    *   before deciding again.
    */
   async updateSkillAccess(agentId: string, grantId: string, access: ToolAccess): Promise<ToolAccessResponse> {
-    return this.client.put<ToolAccessResponse>(`/v1/agents/${agentId}/tools/${grantId}/access`, access);
+    return this.client.put<ToolAccessResponse>(path`/v1/agents/${agentId}/tools/${grantId}/access`, access);
   }
 
   /**
    * Remove a skill from an agent
    */
   async detachSkill(agentId: string, skillId: string): Promise<{ id: string; object: 'tool'; deleted: boolean }> {
-    return this.client.delete<{ id: string; object: 'tool'; deleted: boolean }>(`/v1/agents/${agentId}/tools/${skillId}`);
+    return this.client.delete<{ id: string; object: 'tool'; deleted: boolean }>(path`/v1/agents/${agentId}/tools/${skillId}`);
   }
 
   /** @deprecated Use detachSkill() instead */
@@ -259,7 +260,7 @@ export class AgentsResource {
    * Enable a system skill for an agent
    */
   async enableSystemSkill(agentId: string, skillId: string): Promise<Tool> {
-    const response = await this.client.post<any>(`/v1/agents/${agentId}/tools/enable-system`, { toolId: skillId });
+    const response = await this.client.post<any>(path`/v1/agents/${agentId}/tools/enable-system`, { toolId: skillId });
     return this.unwrapToolResponse(response);
   }
 
@@ -274,7 +275,7 @@ export class AgentsResource {
     skipped: number;
     total: number;
   }> {
-    return this.client.post(`/v1/agents/${agentId}/tools/bulk-enable-system`, { toolIds: skillIds });
+    return this.client.post(path`/v1/agents/${agentId}/tools/bulk-enable-system`, { toolIds: skillIds });
   }
 
   /** @deprecated Use enableSystemSkill() instead */
@@ -290,7 +291,7 @@ export class AgentsResource {
     targetAgentId: string,
     targetAgentName?: string
   ): Promise<{ success: boolean; source_agent_id: string; target_agent_id: string; tool_id: string }> {
-    return this.client.post(`/v1/agents/${agentId}/delegation-permissions`, {
+    return this.client.post(path`/v1/agents/${agentId}/delegation-permissions`, {
       targetAgentId,
       targetAgentName,
     });
@@ -303,14 +304,14 @@ export class AgentsResource {
     agentId: string,
     targetAgentId: string
   ): Promise<{ success: boolean; source_agent_id: string; target_agent_id: string }> {
-    return this.client.delete(`/v1/agents/${agentId}/delegation-permissions/${targetAgentId}`);
+    return this.client.delete(path`/v1/agents/${agentId}/delegation-permissions/${targetAgentId}`);
   }
 
   /**
    * List active child agents (subagents) for an orchestrator agent
    */
   async listChildren(agentId: string): Promise<{ object: 'list'; data: AgentChild[] }> {
-    return this.client.get<{ object: 'list'; data: AgentChild[] }>(`/v1/agents/${agentId}/children`);
+    return this.client.get<{ object: 'list'; data: AgentChild[] }>(path`/v1/agents/${agentId}/children`);
   }
 
   /**
@@ -321,7 +322,7 @@ export class AgentsResource {
     childAgentId: string
   ): Promise<{ success: boolean; deleted: boolean }> {
     return this.client.delete<{ success: boolean; deleted: boolean }>(
-      `/v1/agents/${agentId}/children/${childAgentId}`
+      path`/v1/agents/${agentId}/children/${childAgentId}`
     );
   }
 
@@ -332,7 +333,7 @@ export class AgentsResource {
     agentId: string
   ): Promise<{ success: boolean; torn_down: number }> {
     return this.client.post<{ success: boolean; torn_down: number }>(
-      `/v1/agents/${agentId}/children/teardown-all`
+      path`/v1/agents/${agentId}/children/teardown-all`
     );
   }
 
@@ -349,7 +350,7 @@ export class AgentsResource {
     tools: Array<{ type: string; name: string; description?: string }>;
     sync_errors?: string[];
   }> {
-    return this.client.post(`/v1/agents/${agentId}/tools/refresh`);
+    return this.client.post(path`/v1/agents/${agentId}/tools/refresh`);
   }
 
   /**
@@ -359,7 +360,7 @@ export class AgentsResource {
     agentId: string,
     request: { knowledge_base_id: string }
   ): Promise<{ agent_id: string; knowledge_base_id: string; created_at: number }> {
-    return this.client.post(`/v1/agents/${agentId}/knowledge_graphs`, request);
+    return this.client.post(path`/v1/agents/${agentId}/knowledge_graphs`, request);
   }
 
   /**
@@ -368,7 +369,7 @@ export class AgentsResource {
   async listKnowledgeGraphs(
     agentId: string
   ): Promise<{ object: 'list'; data: any[] }> {
-    return this.client.get(`/v1/agents/${agentId}/knowledge_graphs`);
+    return this.client.get(path`/v1/agents/${agentId}/knowledge_graphs`);
   }
 
   /**
@@ -378,6 +379,6 @@ export class AgentsResource {
     agentId: string,
     kgId: string
   ): Promise<{ agent_id: string; knowledge_base_id: string; deleted: boolean }> {
-    return this.client.delete(`/v1/agents/${agentId}/knowledge_graphs/${kgId}`);
+    return this.client.delete(path`/v1/agents/${agentId}/knowledge_graphs/${kgId}`);
   }
 }

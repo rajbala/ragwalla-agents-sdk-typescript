@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import { QuotaEvent, QuotaStatus } from '../types/index.js';
 
 export class QuotaResource {
@@ -18,14 +19,14 @@ export class QuotaResource {
    * Send quota event
    */
   async sendEvent(workerId: string, event: QuotaEvent): Promise<void> {
-    return this.client.post<void>(`/v1/quotaevents/${workerId}`, event);
+    return this.client.post<void>(path`/v1/quotaevents/${workerId}`, event);
   }
 
   /**
    * Get quota status for a worker
    */
   async getStatus(workerId: string): Promise<QuotaStatus> {
-    return this.client.get<QuotaStatus>(`/v1/quota/${workerId}`);
+    return this.client.get<QuotaStatus>(path`/v1/quota/${workerId}`);
   }
 
   /**
@@ -35,6 +36,6 @@ export class QuotaResource {
     limit: number;
     reset_period?: 'hour' | 'day' | 'month';
   }): Promise<QuotaStatus> {
-    return this.client.post<QuotaStatus>(`/v1/quota/${workerId}`, quota);
+    return this.client.post<QuotaStatus>(path`/v1/quota/${workerId}`, quota);
   }
 }

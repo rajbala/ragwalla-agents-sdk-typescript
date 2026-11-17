@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   Assistant,
   AssistantConfig,
@@ -120,7 +121,7 @@ export class AssistantsResource {
    * Retrieve an assistant by ID
    */
   async retrieve(assistantId: string): Promise<Assistant> {
-    return this.client.get<Assistant>(`/v1/assistants/${assistantId}`);
+    return this.client.get<Assistant>(path`/v1/assistants/${assistantId}`);
   }
 
   /**
@@ -140,7 +141,7 @@ export class AssistantsResource {
    */
   async update(assistantId: string, request: UpdateAssistantRequest): Promise<Assistant> {
     const body = normalizeUpdateRequest(request);
-    const response = await this.client.post<any>(`/v1/assistants/${assistantId}`, body);
+    const response = await this.client.post<any>(path`/v1/assistants/${assistantId}`, body);
 
     // OpenAI-compatible format
     if (response && response.object === 'assistant' && response.id) {
@@ -159,6 +160,6 @@ export class AssistantsResource {
    * Delete an assistant
    */
   async delete(assistantId: string): Promise<AssistantDeleted> {
-    return this.client.delete<AssistantDeleted>(`/v1/assistants/${assistantId}`);
+    return this.client.delete<AssistantDeleted>(path`/v1/assistants/${assistantId}`);
   }
 }

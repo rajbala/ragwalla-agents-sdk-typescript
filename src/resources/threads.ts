@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import type { CreateThreadEventParams, ThreadEvent } from '../types/index.js';
 
 export interface Thread {
@@ -33,7 +34,7 @@ export class ThreadEventsResource {
    * `idempotency_key` to make the call safe to retry.
    */
   async create(threadId: string, params: CreateThreadEventParams): Promise<ThreadEvent> {
-    return this.client.post<ThreadEvent>(`/v1/threads/${threadId}/events`, params);
+    return this.client.post<ThreadEvent>(path`/v1/threads/${threadId}/events`, params);
   }
 }
 
@@ -64,7 +65,7 @@ export class ThreadsResource {
    * Retrieve a thread by ID
    */
   async retrieve(threadId: string): Promise<Thread> {
-    return this.client.get<Thread>(`/v1/threads/${threadId}`);
+    return this.client.get<Thread>(path`/v1/threads/${threadId}`);
   }
 
   /**
@@ -74,13 +75,13 @@ export class ThreadsResource {
     tool_resources?: Record<string, unknown>;
     metadata?: Record<string, string>;
   }): Promise<Thread> {
-    return this.client.post<Thread>(`/v1/threads/${threadId}`, params);
+    return this.client.post<Thread>(path`/v1/threads/${threadId}`, params);
   }
 
   /**
    * Delete a thread
    */
   async delete(threadId: string): Promise<ThreadDeleted> {
-    return this.client.delete<ThreadDeleted>(`/v1/threads/${threadId}`);
+    return this.client.delete<ThreadDeleted>(path`/v1/threads/${threadId}`);
   }
 }

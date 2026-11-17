@@ -1,4 +1,5 @@
 import { HTTPClient, type BinaryResponse } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import type { MessageAudio } from '../types/index.js';
 
 export interface MessageContentText {
@@ -92,14 +93,14 @@ export class MessagesResource {
    * Send a message on an existing thread
    */
   async create(threadId: string, request: CreateMessageRequest): Promise<Message> {
-    return this.client.post<Message>(`/v1/threads/${threadId}/messages`, request);
+    return this.client.post<Message>(path`/v1/threads/${threadId}/messages`, request);
   }
 
   /**
    * Retrieve a single message by ID
    */
   async retrieve(threadId: string, messageId: string): Promise<Message> {
-    return this.client.get<Message>(`/v1/threads/${threadId}/messages/${messageId}`);
+    return this.client.get<Message>(path`/v1/threads/${threadId}/messages/${messageId}`);
   }
 
   /**
@@ -109,7 +110,7 @@ export class MessagesResource {
     threadId: string,
     params?: ListMessagesParams
   ): Promise<ListMessagesResponse> {
-    return this.client.get<ListMessagesResponse>(`/v1/threads/${threadId}/messages`, params);
+    return this.client.get<ListMessagesResponse>(path`/v1/threads/${threadId}/messages`, params);
   }
 
   /**
@@ -121,6 +122,6 @@ export class MessagesResource {
     part: number,
     direction: 'input' | 'output' = 'output'
   ): Promise<BinaryResponse> {
-    return this.client.getBinary(`/v1/threads/${threadId}/messages/${messageId}/audio/${direction}/${part}`);
+    return this.client.getBinary(path`/v1/threads/${threadId}/messages/${messageId}/audio/${direction}/${part}`);
   }
 }

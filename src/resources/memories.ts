@@ -1,4 +1,5 @@
 import { HTTPClient } from '../client/http-client.js';
+import { path } from '../client/path.js';
 import {
   Memory,
   CreateMemoryRequest,
@@ -21,7 +22,7 @@ export class MemoriesResource {
    * Pass `memory_store_id` to target a specific memory store.
    */
   async list(agentId: string, params?: ListMemoriesParams): Promise<ListMemoriesResponse> {
-    return this.client.get<ListMemoriesResponse>(`/v1/agents/${agentId}/memories`, params);
+    return this.client.get<ListMemoriesResponse>(path`/v1/agents/${agentId}/memories`, params);
   }
 
   /**
@@ -29,7 +30,7 @@ export class MemoriesResource {
    * Pass `user_id` in params to target a specific user's memory graph.
    */
   async retrieve(agentId: string, memoryId: string, params?: RetrieveMemoryParams): Promise<Memory> {
-    return this.client.get<Memory>(`/v1/agents/${agentId}/memories/${memoryId}`, params);
+    return this.client.get<Memory>(path`/v1/agents/${agentId}/memories/${memoryId}`, params);
   }
 
   /**
@@ -37,7 +38,7 @@ export class MemoriesResource {
    * Include `user_id` in the request to target a specific user's memory graph.
    */
   async create(agentId: string, request: CreateMemoryRequest): Promise<Memory> {
-    return this.client.post<Memory>(`/v1/agents/${agentId}/memories`, request);
+    return this.client.post<Memory>(path`/v1/agents/${agentId}/memories`, request);
   }
 
   /**
@@ -45,7 +46,7 @@ export class MemoriesResource {
    * Include `user_id` in the request to target a specific user's memory graph.
    */
   async createBatch(agentId: string, request: BatchCreateMemoryRequest): Promise<BatchCreateMemoryResponse> {
-    return this.client.post<BatchCreateMemoryResponse>(`/v1/agents/${agentId}/memories`, request);
+    return this.client.post<BatchCreateMemoryResponse>(path`/v1/agents/${agentId}/memories`, request);
   }
 
   /**
@@ -58,7 +59,7 @@ export class MemoriesResource {
     if (params?.user_id) queryParts.push(`user_id=${encodeURIComponent(params.user_id)}`);
     if (params?.memory_store_id) queryParts.push(`memory_store_id=${encodeURIComponent(params.memory_store_id)}`);
     const queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
-    return this.client.delete<{ deleted: boolean; id: string }>(`/v1/agents/${agentId}/memories/${memoryId}${queryString}`);
+    return this.client.delete<{ deleted: boolean; id: string }>(path`/v1/agents/${agentId}/memories/${memoryId}` + queryString);
   }
 
   /**
@@ -66,6 +67,6 @@ export class MemoriesResource {
    * Include `user_id` in the request to target a specific user's memory graph.
    */
   async search(agentId: string, request: SearchMemoriesRequest): Promise<SearchMemoriesResponse> {
-    return this.client.post<SearchMemoriesResponse>(`/v1/agents/${agentId}/memories/search`, request);
+    return this.client.post<SearchMemoriesResponse>(path`/v1/agents/${agentId}/memories/search`, request);
   }
 }

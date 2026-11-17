@@ -15,6 +15,7 @@ import {
   type TokenUsageEvent,
 } from '../types/index.js';
 import { DEFAULT_BASE_URL } from './base-url.js';
+import { path } from './path.js';
 
 // Universal WebSocket interface
 interface UniversalWebSocket {
@@ -750,10 +751,12 @@ export class RagwallaWebSocket {
     if (this.activeRunId && effectiveThreadId) {
       params.set('resume_run_id', this.activeRunId);
     }
-    const url = `${this.baseURL}/agents/${agentId}/${connectionId}?${params.toString()}`;
-    
-    this.log('info', 'Attempting to connect to WebSocket', { 
-      url, 
+    const route = path`/agents/${agentId}/${connectionId}`;
+    const url = `${this.baseURL}${route}?${params.toString()}`;
+
+    // The URL carries the token; the log names the route without it.
+    this.log('info', 'Attempting to connect to WebSocket', {
+      route,
       agentId, 
       connectionId,
       tokenLength: token.length,
