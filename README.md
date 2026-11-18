@@ -369,6 +369,17 @@ for await (const event of stream) {
 Continue the conversation by passing the run's session as `thread_id`. Leaving a stream (a
 `break`, `stream.abort()`, or an `AbortSignal`) closes only the connection: the run carries on.
 
+A stream read with `for await` reconnects on its own when its connection drops before the run's
+stream ends: it waits as the stream's `retry:` says and asks for the run's events after the last
+event id it saw, so nothing is missed or repeated. It gives up after `maxReconnects` attempts in a
+row that bring nothing new (default 5), or at once with Ragwalla's error when the run can no longer
+be replayed (`stream_resume_unavailable`, 409, more than 15 minutes after the run ended): read it
+with `runs.retrieve` then.
+
+```typescript
+const stream = await client.agents.runs.stream(agentId, { input: 'Hello' }, { maxReconnects: 3 });
+```
+
 ```typescript
 const run = await client.agents.runs.create(agentId, { input: 'And Q4?', thread_id: threadId }); // waits for the end
 const queued = await client.agents.runs.create(agentId, { input: 'Long job', background: true }); // answers at once
@@ -399,6 +410,27 @@ export async function POST(request: Request) {
 The browser reads it with `fetch` and a stream reader (or any SSE parser that accepts a
 `fetch` body, since `EventSource` cannot `POST`). Serve it over HTTP/2 and keep compression off
 on that route. `parseServerSentEvents` (exported) is the SDK's own standard SSE parser.
+
+`toReadableStream()` passes the bytes on once and does not reconnect: the browser does, as the
+standard describes. It keeps the run's id (`turn_id` on the events) and the last `id:` it saw,
+and on a dropped connection asks your server again, which forwards the id:
+
+```typescript
+export async function GET(request: Request) {
+  const runId = new URL(request.url).searchParams.get('run')!;
+  const stream = await client.agents.runs.events(agentId, runId, {
+    lastEventId: request.headers.get('Last-Event-ID') ?? undefined,
+    signal: request.signal,
+  });
+  return new Response(stream.toReadableStream(), {
+    headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' },
+  });
+}
+```
+
+A browser can use `EventSource` for this `GET`, which reconnects with `Last-Event-ID` itself.
+`runs.events` answers a 409 error (`stream_resume_unavailable`) once Ragwalla can no longer replay
+the run; pass it on, and the browser reads the conversation from your server instead.
 
 ## Real-time WebSocket Chat
 

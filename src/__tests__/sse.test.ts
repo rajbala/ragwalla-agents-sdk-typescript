@@ -125,6 +125,84 @@ describe('agents.runs', () => {
     await expect(runs().stream('a1', { input: 'Hello' })).rejects.toMatchObject({ message: 'No agent', status: 404 });
   });
 
+  /** A stream that sends `text`, then fails as a dropped connection does. */
+  const dropping = (text: string) => {
+    let sent = false;
+    return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) controller.error(new TypeError('network error'));
+        else controller.enqueue(new TextEncoder().encode(text));
+        sent = true;
+      },
+    }), { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+
+  const event = (id: string, type: string, extra = '') =>
+    `id: ${id}\nevent: ${type}\ndata: {"type":"${type}","event_id":"${id}","turn_id":"run_1"${extra}}\n\n`;
+
+  it('reconnects after a dropped connection from the last event it saw', async () => {
+    fetchMock
+      .mockResolvedValueOnce(dropping('retry: 1\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created') + event('evt_run_1_1_0', 'agent.session.turn.output_text.delta', ',"delta":"Hel"')))
+      .mockResolvedValueOnce(sse('retry: 1\n\n' + event('evt_run_1_2_0', 'agent.session.turn.output_text.delta', ',"delta":"lo"') + event('evt_run_1_3_0', 'agent.session.turn.completed')));
+    const stream = await runs().stream('agent 1', { input: 'Hello' });
+    const ids: string[] = [];
+    for await (const e of stream) ids.push(e.event_id);
+    expect(ids).toEqual(['evt_run_1_0_0', 'evt_run_1_1_0', 'evt_run_1_2_0', 'evt_run_1_3_0']);
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe('https://x.ragwalla.com/v1/agents/agent%201/runs/run_1/events');
+    expect(init!.method).toBe('GET');
+    expect((init!.headers as Record<string, string>)['Last-Event-ID']).toBe('evt_run_1_1_0');
+  });
+
+  it('reconnects when the connection closes before the run\'s stream ends', async () => {
+    fetchMock
+      .mockResolvedValueOnce(sse('retry: 1\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created')))
+      .mockResolvedValueOnce(sse(event('evt_run_1_1_0', 'agent.session.requires_action')));
+    const types: string[] = [];
+    for await (const e of await runs().stream('a1', { input: 'Hello' })) types.push(e.type);
+    expect(types).toEqual(['agent.session.turn.created', 'agent.session.requires_action']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up with the error Ragwalla answers a reconnect it cannot serve with', async () => {
+    fetchMock
+      .mockResolvedValueOnce(dropping('retry: 1\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created')))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'gone', code: 'stream_resume_unavailable' } }), {
+        status: 409, headers: { 'Content-Type': 'application/json' },
+      }));
+    const stream = await runs().stream('a1', { input: 'Hello' });
+    const read = (async () => { for await (const _ of stream) { /* read */ } })();
+    await expect(read).rejects.toMatchObject({ status: 409, code: 'stream_resume_unavailable' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after reconnects in a row that bring nothing new', async () => {
+    fetchMock
+      .mockResolvedValueOnce(dropping('retry: 1\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created')))
+      .mockRejectedValue(new TypeError('network error'));
+    const stream = await runs().stream('a1', { input: 'Hello' }, { maxReconnects: 2 });
+    const read = (async () => { for await (const _ of stream) { /* read */ } })();
+    await expect(read).rejects.toThrow('network error');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws a dropped stream it has no id to resume from', async () => {
+    fetchMock.mockResolvedValueOnce(dropping('data: {"type":"x","event_id":"e1"}\n\n'));
+    const stream = await runs().stream('a1', { input: 'Hello' });
+    const read = (async () => { for await (const _ of stream) { /* read */ } })();
+    await expect(read).rejects.toThrow('network error');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a run\'s events after the id a browser reconnected with', async () => {
+    fetchMock.mockResolvedValueOnce(sse(event('evt_run_1_3_0', 'agent.session.turn.completed')));
+    const stream = await runs().events('a1', 'run 1', { lastEventId: 'evt_run_1_2_0' });
+    expect(await new Response(stream.toReadableStream()).text()).toContain('evt_run_1_3_0');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://x.ragwalla.com/v1/agents/a1/runs/run%201/events');
+    expect((init!.headers as Record<string, string>)['Last-Event-ID']).toBe('evt_run_1_2_0');
+  });
+
   it('runs and waits, or runs in the background', async () => {
     fetchMock.mockImplementation(async () => new Response('{"id":"run_1"}', { headers: { 'Content-Type': 'application/json' } }));
     const r = runs();
