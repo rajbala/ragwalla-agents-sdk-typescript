@@ -339,8 +339,25 @@ export class HTTPClient {
     data: unknown,
     options: { signal?: AbortSignal; headers?: Record<string, string> } = {},
   ): Promise<{ response: Response; abort: () => void }> {
+    return this.openStream('POST', path, data, options);
+  }
+
+  /** GETs a server-sent event stream, as `postStream` POSTs one. */
+  async getStream(
+    path: string,
+    options: { signal?: AbortSignal; headers?: Record<string, string> } = {},
+  ): Promise<{ response: Response; abort: () => void }> {
+    return this.openStream('GET', path, undefined, options);
+  }
+
+  private async openStream(
+    method: 'GET' | 'POST',
+    path: string,
+    data: unknown,
+    options: { signal?: AbortSignal; headers?: Record<string, string> },
+  ): Promise<{ response: Response; abort: () => void }> {
     const url = new URL(path, this.baseURL);
-    this.log('info', 'Making POST (stream) request', { url: url.toString() });
+    this.log('info', `Making ${method} (stream) request`, { url: url.toString() });
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (options.signal?.aborted) abort();
@@ -348,13 +365,13 @@ export class HTTPClient {
     const timeoutId = setTimeout(abort, this.timeout);
     try {
       const response = await fetch(url.toString(), {
-        method: 'POST',
+        method,
         headers: { ...this.getHeaders(), ...options.headers, 'Accept': 'text/event-stream' },
-        body: JSON.stringify(data),
+        body: data === undefined ? undefined : JSON.stringify(data),
         signal: controller.signal,
       });
       if (!response.ok) await this.handleResponse<never>(response);
-      if (!response.body) throw new Error(`POST ${url.pathname} answered ${response.status} with no body`);
+      if (!response.body) throw new Error(`${method} ${url.pathname} answered ${response.status} with no body`);
       return { response, abort };
     } finally {
       clearTimeout(timeoutId);
