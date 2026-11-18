@@ -1930,3 +1930,73 @@ export interface KgInfrastructureStatus {
     files_total: number;
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Agent runs over HTTP (`POST /v1/agents/:agentId/runs`)
+// ---------------------------------------------------------------------------------------------
+
+/** A run's status: `waiting` is a run waiting on its client for function results. */
+export type AgentRunStatus = 'queued' | 'in_progress' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+
+export interface CreateAgentRunParams {
+  /** The user's message. */
+  input: string;
+  /** Continue a session this credential opened; without one the run opens a new session. */
+  thread_id?: string;
+  metadata?: Record<string, string>;
+  /**
+   * Makes a retried run with a `thread_id` start once (the `Idempotency-Key` header).
+   * Ignored by the server without a `thread_id`.
+   */
+  idempotencyKey?: string;
+}
+
+/** An item a run wrote: a message, a tool call, a tool call's output, a subagent's report. */
+export interface AgentRunItem {
+  type: string;
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface AgentRun {
+  object: 'agent.run';
+  id: string;
+  agent_id: string;
+  thread_id: string;
+  status: AgentRunStatus;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  error: { code: string; message: string } | null;
+  usage: {
+    input_tokens: number;
+    input_tokens_details: { cached_tokens: number };
+    output_tokens: number;
+    output_tokens_details: { reasoning_tokens: number };
+    total_tokens: number;
+  } | null;
+  /** Every item the run wrote after its input, in order. */
+  output: AgentRunItem[];
+  /** The run's answer as text, or null while it has none. */
+  output_text: string | null;
+}
+
+/**
+ * An event of a streamed run: the session events OpenAI's Agents API defines
+ * (`agent.session.turn.created`, `agent.session.turn.output_text.delta`, `agent.session.idle`, ...).
+ */
+export interface AgentSessionEvent {
+  type: string;
+  event_id: string;
+  [key: string]: unknown;
+}
+
+/** The event that carries a run's text as it is written. */
+export interface AgentSessionTextDeltaEvent extends AgentSessionEvent {
+  type: 'agent.session.turn.output_text.delta';
+  turn_id: string;
+  item_id: string;
+  output_index: number;
+  content_index: number;
+  delta: string;
+}

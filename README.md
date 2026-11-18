@@ -352,6 +352,54 @@ const kgs = await ragwalla.agents.listKnowledgeGraphs(agent.id);
 await ragwalla.agents.detachKnowledgeGraph(agent.id, kgId);
 ```
 
+## Running an Agent over HTTPS (no WebSockets)
+
+Where WebSockets are blocked (many enterprise networks), run the agent over plain HTTPS. A
+streamed run is a `POST` answered with server-sent events: the session events of OpenAI's
+Agents API (`agent.session.turn.output_text.delta`, `agent.session.idle`, ...), with a `: ping`
+comment every 15 seconds while the agent is quiet, so idle-sensitive proxies keep it open.
+
+```typescript
+const stream = await client.agents.runs.stream(agentId, { input: 'Summarize the Q3 report' });
+for await (const event of stream) {
+  if (event.type === 'agent.session.turn.output_text.delta') process.stdout.write(event.delta as string);
+}
+```
+
+Continue the conversation by passing the run's session as `thread_id`. Leaving a stream (a
+`break`, `stream.abort()`, or an `AbortSignal`) closes only the connection: the run carries on.
+
+```typescript
+const run = await client.agents.runs.create(agentId, { input: 'And Q4?', thread_id: threadId }); // waits for the end
+const queued = await client.agents.runs.create(agentId, { input: 'Long job', background: true }); // answers at once
+const later = await client.agents.runs.retrieve(agentId, queued.id);
+await client.agents.runs.cancel(agentId, queued.id);
+```
+
+### Passing a stream on to a browser
+
+A chat app's server (browser → your server → Ragwalla) can answer its browser with Ragwalla's
+stream as it arrives, heartbeats included:
+
+```typescript
+// e.g. a Next.js route handler, a Cloudflare Worker, or any fetch-style server
+export async function POST(request: Request) {
+  const { input, threadId } = await request.json();
+  const stream = await client.agents.runs.stream(agentId, { input, thread_id: threadId }, { signal: request.signal });
+  return new Response(stream.toReadableStream(), {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+```
+
+The browser reads it with `fetch` and a stream reader (or any SSE parser that accepts a
+`fetch` body, since `EventSource` cannot `POST`). Serve it over HTTP/2 and keep compression off
+on that route. `parseServerSentEvents` (exported) is the SDK's own standard SSE parser.
+
 ## Real-time WebSocket Chat
 
 > **Note:** All agent chat happens via WebSocket, not HTTP. HTTP endpoints are for CRUD operations only (agents, threads, messages, etc.). Use `createWebSocket()` for real-time conversations.

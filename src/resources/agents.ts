@@ -1,5 +1,6 @@
 import { HTTPClient } from '../client/http-client.js';
 import { path } from '../client/path.js';
+import { AgentRunsResource } from './agent-runs.js';
 import {
   Agent,
   AgentChild,
@@ -17,7 +18,12 @@ import {
 } from '../types/index.js';
 
 export class AgentsResource {
-  constructor(private client: HTTPClient) {}
+  /** Running an agent over HTTPS, streamed as server-sent events or not. */
+  public readonly runs: AgentRunsResource;
+
+  constructor(private client: HTTPClient) {
+    this.runs = new AgentRunsResource(client);
+  }
 
   private normalizeSystemSkillProvisioning<T extends CreateAgentRequest | UpdateAgentRequest>(
     request: T
