@@ -1,5 +1,6 @@
 import { RagwallaConfig, RagwallaError } from '../types/index.js';
 import { DEFAULT_BASE_URL } from './base-url.js';
+import { parseServerSentEvents } from './sse.js';
 
 /** A binary response: its bytes, media type and headers (e.g. `x-ragwalla-sample-rate` on speech). */
 export interface BinaryResponse {
@@ -187,7 +188,7 @@ export class HTTPClient {
     }
   }
 
-  async post<T>(path: string, data?: any): Promise<T> {
+  async post<T>(path: string, data?: any, options: { headers?: Record<string, string> } = {}): Promise<T> {
     const url = new URL(path, this.baseURL);
     
     this.log('info', 'Making POST request', { url: url.toString(), hasData: !!data });
@@ -201,7 +202,7 @@ export class HTTPClient {
     try {
       const response = await fetch(url.toString(), {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: { ...this.getHeaders(), ...options.headers },
         body: data ? JSON.stringify(data) : undefined,
         signal: controller.signal
       });
@@ -328,56 +329,56 @@ export class HTTPClient {
     }
   }
 
-  async postEventStream<T>(path: string, data?: any): Promise<ReadableStream<T>> {
+  /**
+   * POSTs JSON and answers with the response once its headers arrive, its body a server-sent
+   * event stream still to be read. The client's timeout bounds only the wait for the headers: a
+   * stream lasts as long as its turn. `signal` aborts the request and the stream.
+   */
+  async postStream(
+    path: string,
+    data: unknown,
+    options: { signal?: AbortSignal; headers?: Record<string, string> } = {},
+  ): Promise<{ response: Response; abort: () => void }> {
     const url = new URL(path, this.baseURL);
-    
-    const response = await fetch(url.toString(), {
-      method: 'POST',
-      headers: {
-        ...this.getHeaders(),
-        'Accept': 'text/event-stream',
+    this.log('info', 'Making POST (stream) request', { url: url.toString() });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const timeoutId = setTimeout(abort, this.timeout);
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { ...this.getHeaders(), ...options.headers, 'Accept': 'text/event-stream' },
+        body: JSON.stringify(data),
+        signal: controller.signal,
+      });
+      if (!response.ok) await this.handleResponse<never>(response);
+      if (!response.body) throw new Error(`POST ${url.pathname} answered ${response.status} with no body`);
+      return { response, abort };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * POSTs JSON and reads the server-sent event stream it answers with: each event's `data`,
+   * parsed as JSON, until the stream ends or sends `[DONE]`.
+   */
+  async postEventStream<T>(path: string, data?: any): Promise<ReadableStream<T>> {
+    const { response } = await this.postStream(path, data);
+    const events = parseServerSentEvents(response.body!);
+    return new ReadableStream<T>({
+      async pull(controller) {
+        const next = await events.next();
+        // OpenAI-style streams end with a `[DONE]` sentinel, which is not JSON.
+        if (next.done || next.value.data === '[DONE]') controller.close();
+        else controller.enqueue(JSON.parse(next.value.data) as T);
       },
-      body: data ? JSON.stringify(data) : undefined,
+      async cancel() {
+        await events.return(undefined);
+      },
     });
-
-    if (!response.ok) {
-      const body: any = await response.json().catch(() => ({}));
-      const errorObj = body.error || body;
-      const msg = typeof errorObj === 'string' ? errorObj : (errorObj.message || `HTTP ${response.status}`);
-      const errType = typeof errorObj === 'string' ? undefined : errorObj.type;
-      const errCode = typeof errorObj === 'string' ? undefined : errorObj.code;
-      const errParam = typeof errorObj === 'string' ? undefined : errorObj.param;
-      throw new RagwallaAPIError(
-        msg,
-        response.status,
-        errType,
-        errCode,
-        errParam
-      );
-    }
-
-    if (!response.body) {
-      throw new Error('No response body');
-    }
-
-    return response.body.pipeThrough(new TransformStream({
-      transform(chunk, controller) {
-        const decoder = new TextDecoder();
-        const text = decoder.decode(chunk);
-        const lines = text.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              controller.enqueue(data);
-            } catch (e) {
-              // Skip invalid JSON
-            }
-          }
-        }
-      }
-    }));
   }
 }
 
