@@ -60,6 +60,8 @@ export class AgentRunStream implements AsyncIterable<AgentSessionEvent> {
     abortRequest: () => void,
     private readonly resumeRun: ResumeRun,
     private readonly options: AgentRunStreamOptions = {},
+    /** Where the stream begins, when it was opened to resume a run: what a reconnect goes on from. */
+    private readonly resumedFrom: { runId: string; lastEventId: string } | null = null,
   ) {
     this.abortRequest = abortRequest;
     if (options.signal?.aborted) this.abort();
@@ -75,9 +77,9 @@ export class AgentRunStream implements AsyncIterable<AgentSessionEvent> {
   async *[Symbol.asyncIterator](): AsyncIterator<AgentSessionEvent> {
     const maxReconnects = this.options.maxReconnects ?? DEFAULT_MAX_RECONNECTS;
     let body = this.take();
-    let lastEventId = '';
+    let lastEventId = this.resumedFrom?.lastEventId ?? '';
     let reconnectMs = DEFAULT_RECONNECT_MS;
-    let runId: string | null = null;
+    let runId: string | null = this.resumedFrom?.runId ?? null;
     let fruitless = 0;
     for (;;) {
       let ended = false;
@@ -100,13 +102,16 @@ export class AgentRunStream implements AsyncIterable<AgentSessionEvent> {
       }
       if (ended || this.closed) return;
       // A stream with no ids (or no run yet) cannot be resumed: it ends as it ended.
-      if (runId === null || lastEventId === '' || fruitless >= maxReconnects) {
+      if (runId === null || lastEventId === '') {
         if (dropped !== null) throw dropped;
         return;
       }
+      if (fruitless >= maxReconnects) {
+        throw dropped ?? new Error(`Run ${runId}'s stream closed before the run's stream ended, ${fruitless} time(s) in a row`);
+      }
       for (;;) {
         fruitless += 1;
-        await new Promise((resolve) => setTimeout(resolve, reconnectMs));
+        await this.delay(reconnectMs);
         if (this.closed) return;
         try {
           const reopened = await this.resumeRun(runId, lastEventId, this.controller.signal);
@@ -121,6 +126,20 @@ export class AgentRunStream implements AsyncIterable<AgentSessionEvent> {
         }
       }
     }
+  }
+
+  /** Wait `ms`, or less when the stream is aborted meanwhile. */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.closed) return resolve();
+      const done = () => {
+        clearTimeout(timer);
+        this.controller.signal.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      this.controller.signal.addEventListener('abort', done, { once: true });
+    });
   }
 
   /**
@@ -210,7 +229,8 @@ export class AgentRunsResource {
     options: AgentRunStreamOptions & { lastEventId?: string } = {},
   ): Promise<AgentRunStream> {
     const { response, abort } = await this.openEvents(agentId, runId, options.lastEventId, options.signal);
-    return new AgentRunStream(response, abort, this.resumer(agentId), options);
+    return new AgentRunStream(response, abort, this.resumer(agentId), options,
+      options.lastEventId === undefined ? null : { runId, lastEventId: options.lastEventId });
   }
 
   private openEvents(agentId: string, runId: string, lastEventId: string | undefined, signal: AbortSignal | undefined) {

@@ -186,6 +186,40 @@ describe('agents.runs', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('throws once reconnects in a row close before the run\'s stream ends', async () => {
+    fetchMock
+      .mockResolvedValueOnce(sse('retry: 1\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created')))
+      .mockImplementation(async () => sse(''));
+    const stream = await runs().stream('a1', { input: 'Hello' }, { maxReconnects: 2 });
+    const read = (async () => { for await (const _ of stream) { /* read */ } })();
+    await expect(read).rejects.toThrow('closed before the run\'s stream ended');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops waiting to reconnect when the stream is aborted', async () => {
+    fetchMock.mockResolvedValueOnce(dropping('retry: 60000\n\n' + event('evt_run_1_0_0', 'agent.session.turn.created')));
+    const stream = await runs().stream('a1', { input: 'Hello' });
+    const types: string[] = [];
+    const read = (async () => { for await (const e of stream) types.push(e.type); })();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const started = Date.now();
+    stream.abort();
+    await read;
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(types).toEqual(['agent.session.turn.created']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconnects a resumed stream that drops before its first event', async () => {
+    fetchMock
+      .mockResolvedValueOnce(dropping(''))
+      .mockResolvedValueOnce(sse(event('evt_run_1_3_0', 'agent.session.turn.completed')));
+    const types: string[] = [];
+    for await (const e of await runs().events('a1', 'run_1', { lastEventId: 'evt_run_1_2_0' })) types.push(e.type);
+    expect(types).toEqual(['agent.session.turn.completed']);
+    expect((fetchMock.mock.calls[1][1]!.headers as Record<string, string>)['Last-Event-ID']).toBe('evt_run_1_2_0');
+  });
+
   it('throws a dropped stream it has no id to resume from', async () => {
     fetchMock.mockResolvedValueOnce(dropping('data: {"type":"x","event_id":"e1"}\n\n'));
     const stream = await runs().stream('a1', { input: 'Hello' });
