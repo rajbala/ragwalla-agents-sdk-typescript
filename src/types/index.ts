@@ -197,6 +197,8 @@ export interface Agent {
   /** Absent: the agent has no speech. */
   voice?: AgentVoiceConfig;
   conversationRecall?: ConversationRecall;
+  /** The version of its configuration the agent runs; null before it has versions. */
+  liveVersion?: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -286,6 +288,10 @@ export interface UpdateAgentRequest {
   voice?: AgentVoiceConfig | null;
   /** "Remember long conversations"; turning it off removes what it stored after 48 hours. */
   conversationRecall?: ConversationRecallSetting;
+  /** A name for the version this update makes, when it changes versioned configuration. */
+  label?: string | null;
+  /** A note on the version this update makes. */
+  note?: string | null;
 }
 
 export type AgentTool = Tool;
@@ -1949,6 +1955,12 @@ export interface CreateAgentRunParams {
    * Ignored by the server without a `thread_id`.
    */
   idempotencyKey?: string;
+  /**
+   * Pins the run's session to a version of the agent: this run and the session's later ones run
+   * it until another run pins it again, or `'live'` clears the pin. A version that is retired,
+   * deleted or made for another kind of agent is refused (409).
+   */
+  version?: AgentVersionPin;
 }
 
 /** An item a run wrote: a message, a tool call, a tool call's output, a subagent's report. */
@@ -1979,6 +1991,12 @@ export interface AgentRun {
   output: AgentRunItem[];
   /** The run's answer as text, or null while it has none. */
   output_text: string | null;
+  /** The version of the agent the run ran; null for an agent with no versions. */
+  agent_version: number | null;
+  /** Whether a pin chose that version, rather than the agent's live one. */
+  agent_version_pinned: boolean;
+  /** The version a pin named that no longer fit, so the run ran live instead; else null. */
+  agent_version_pin_dropped: number | null;
 }
 
 /**
@@ -1999,4 +2017,128 @@ export interface AgentSessionTextDeltaEvent extends AgentSessionEvent {
   output_index: number;
   content_index: number;
   delta: string;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Agent configuration versions (`/v1/agents/:agentId/versions`)
+// ---------------------------------------------------------------------------------------------
+
+/** A version number to pin a session to, or `'live'` to follow the agent's live version. */
+export type AgentVersionPin = number | 'live';
+
+/** What made a version. */
+/**
+ * What made a version: a save, the agent's own edit, the agent as it was before its first versioned
+ * save, or a change made outside versions, recorded before the next save.
+ */
+export type AgentVersionSource = 'save' | 'self_edit' | 'first_touch' | 'drift';
+
+export interface AgentVersion {
+  object: 'agent.version';
+  version: number;
+  /** Whether it is the version the agent runs now. */
+  live: boolean;
+  created_at: number;
+  created_by: string | null;
+  source: AgentVersionSource;
+  label: string | null;
+  note: string | null;
+  /** The version it was made from, or null. */
+  based_on: number | null;
+  /** When it was retired (it can no longer be pinned or promoted), or null. */
+  retired_at: number | null;
+  config_hash: string;
+  /** The kind of agent it was made for. */
+  runtime: Record<string, unknown>;
+}
+
+/** A version with its configuration. */
+export interface AgentVersionDetail extends AgentVersion {
+  based_on_deleted: boolean;
+  instructions: string | null;
+  platform_instructions: string | null;
+  config: Record<string, unknown>;
+  /** The fields a version holds; everything else is the agent's live setting. */
+  versioned: string[];
+}
+
+export interface AgentVersionList {
+  object: 'list';
+  /** Newest first. */
+  data: AgentVersion[];
+  has_more: boolean;
+  live_version: number | null;
+  /** Whether the agent's configuration differs from its live version (changed outside versions). */
+  drift: boolean;
+  /** Whether the agent changed kind since its live version was made. */
+  kind_changed: boolean;
+}
+
+export interface ListAgentVersionsParams {
+  limit?: number;
+  /** Versions below this number: the last `version` of the previous page. */
+  before?: number;
+}
+
+/**
+ * A new version: the versioned fields given, laid over `based_on` (the live configuration when
+ * absent). On an assistant-backed agent the model settings are overrides of its assistant's.
+ */
+export interface CreateAgentVersionParams {
+  based_on?: number;
+  instructions?: string;
+  platformInstructions?: string | null;
+  model?: string;
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  decisionModel?: string | null;
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
+  responseFormat?: AgentResponseFormat | null;
+  voice?: AgentVoiceConfig | null;
+  subagentLifecycle?: SubagentLifecycleConfig;
+  /** null: an assistant-backed agent's version follows its assistant's model settings. */
+  assistantOverrides?: null;
+  label?: string | null;
+  note?: string | null;
+  /** Make it live as well. */
+  promote?: boolean;
+}
+
+/** Structured output: every reply is JSON matching the schema. */
+export interface AgentResponseFormat {
+  type: 'json_schema';
+  json_schema: { name: string; schema: Record<string, unknown>; strict: true };
+}
+
+export interface AgentVersionDeleted {
+  object: 'agent.version.deleted';
+  version: number;
+  deleted: true;
+  /** Sessions that were pinned to it, which now refuse runs until pinned again. */
+  pinned_threads: number;
+}
+
+/** A change of the agent's live version. */
+export interface AgentVersionEvent {
+  object: 'agent.version_event';
+  id: string;
+  from_version: number | null;
+  to_version: number;
+  /** The versioned fields that changed. */
+  changed: string[];
+  actor: string | null;
+  created_at: number;
+}
+
+export interface AgentVersionEventList {
+  object: 'list';
+  data: AgentVersionEvent[];
+  has_more: boolean;
+}
+
+export interface ListAgentVersionEventsParams {
+  limit?: number;
+  /** Events before this one: the last `id` of the previous page. */
+  before?: string;
 }

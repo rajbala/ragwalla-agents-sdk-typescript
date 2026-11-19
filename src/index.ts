@@ -102,6 +102,7 @@ export * from './client/http-client.js';
 export * from './client/websocket-client.js';
 export * from './resources/agents.js';
 export * from './resources/agent-runs.js';
+export * from './resources/agent-versions.js';
 export * from './client/sse.js';
 export * from './resources/assistants.js';
 export * from './resources/threads.js';

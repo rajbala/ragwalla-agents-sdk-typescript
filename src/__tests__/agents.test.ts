@@ -249,4 +249,53 @@ describe('AgentsResource', () => {
 
     await expect(agents.attachSkills('agent_123', skills)).rejects.toThrow('ata_6');
   });
+
+  describe('versions', () => {
+    it('lists, reads, makes, promotes, retires and deletes versions at their routes', async () => {
+      client.get.mockResolvedValue({});
+      client.post.mockResolvedValue({});
+      client.delete.mockResolvedValue({});
+
+      await agents.versions.list('agent_123', { limit: 10, before: 5 });
+      expect(client.get).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions', { limit: 10, before: 5 });
+      await agents.versions.retrieve('agent_123', 3);
+      expect(client.get).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions/3');
+      await agents.versions.create('agent_123', { based_on: 2, instructions: 'Shorter.', label: 'short', promote: true });
+      expect(client.post).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions', {
+        based_on: 2, instructions: 'Shorter.', label: 'short', promote: true,
+      });
+      await agents.versions.promote('agent_123', 2);
+      expect(client.post).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions/2/promote');
+      await agents.versions.retire('agent_123', 4);
+      expect(client.post).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions/4/retire');
+      await agents.versions.delete('agent_123', 4);
+      expect(client.delete).toHaveBeenLastCalledWith('/v1/agents/agent_123/versions/4');
+      await agents.versions.events('agent_123', { before: 'ave_1' });
+      expect(client.get).toHaveBeenLastCalledWith('/v1/agents/agent_123/version-events', { before: 'ave_1' });
+    });
+
+    it('encodes the agent id as one path segment', async () => {
+      client.get.mockResolvedValue({});
+      await agents.versions.list('../organizations/org_1');
+      expect(client.get).toHaveBeenLastCalledWith('/v1/agents/..%2Forganizations%2Forg_1/versions', undefined);
+    });
+
+    it('sends a run\'s version pin in its body', async () => {
+      client.post.mockResolvedValue({});
+      await agents.runs.create('agent_123', { input: 'Hi', thread_id: 'thread_1', version: 3 });
+      expect(client.post).toHaveBeenLastCalledWith(
+        '/v1/agents/agent_123/runs',
+        { input: 'Hi', thread_id: 'thread_1', version: 3, mode: 'wait' },
+        { headers: {} },
+      );
+      await agents.runs.create('agent_123', { input: 'Hi', thread_id: 'thread_1', version: 'live' });
+      expect((client.post.mock.calls.at(-1)![1] as any).version).toBe('live');
+    });
+
+    it('asks for a socket token with a version claim', async () => {
+      client.post.mockResolvedValue({});
+      await agents.getToken({ agent_id: 'agent_123', version: 2 });
+      expect(client.post).toHaveBeenLastCalledWith('/v1/agents/auth/websocket', { agent_id: 'agent_123', version: 2 });
+    });
+  });
 });
