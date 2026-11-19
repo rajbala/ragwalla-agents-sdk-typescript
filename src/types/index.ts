@@ -298,27 +298,95 @@ export type AgentTool = Tool;
 
 // Model types
 
-export interface ModelInfo {
+/** USD per token, as decimal strings, in OpenRouter's field names. */
+export interface ModelPricing {
+  prompt: string;
+  completion: string;
+  input_cache_read?: string;
+  input_cache_write?: string;
+}
+
+/**
+ * The features the model catalogue describes for a chat model's serving provider. A feature left
+ * out is one the catalogue is silent on, not one the model refuses.
+ */
+export interface ChatModelCapabilities {
+  streaming?: boolean;
+  tools?: boolean;
+  structured_output?: boolean;
+  logprobs?: boolean;
+}
+
+/** A model call's `ragwalla` block for a chat model: `/v1/chat/completions`, `/v1/responses`, `/v1/messages`. */
+export interface ChatModelExtensions {
+  type: 'model';
+  kind: 'chat';
+  provider: string;
+  /** The provider API the model is served on. */
+  surface: 'chat_completions' | 'responses';
+  /** Null where the catalogue describes nothing for the model. */
+  capabilities: ChatModelCapabilities | null;
+}
+
+/** An embedding model, for `/v1/embeddings` and a vector store's `embedding_model`. */
+export interface EmbeddingModelExtensions {
+  type: 'model';
+  kind: 'embedding';
+  provider: string;
+  /** The fixed width it embeds at; a vector store keeps the width it was made with. */
+  dimensions: number;
+}
+
+/** A speech model, for `/v1/audio/speech` and an agent's `voice.speech`. */
+export interface SpeechModelExtensions {
+  type: 'model';
+  kind: 'speech';
+  provider: string;
+  streaming: true;
+  output_audio_formats: SpeechFormat[];
+  max_input_chars: number;
+  voices?: string[];
+}
+
+/** A transcription model, for `/v1/audio/transcriptions` and an agent's `voice.transcription`. */
+export interface TranscriptionModelExtensions {
+  type: 'model';
+  kind: 'transcription';
+  provider: string;
+  streaming: false;
+}
+
+/** An agent the key can run, as the model `agent/<id>` on `/v1/responses` and `/v1/chat/completions`. */
+export interface AgentModelExtensions {
+  type: 'agent';
+  /** Null for an agent with no name. */
+  name: string | null;
+}
+
+export type ModelExtensions =
+  | ChatModelExtensions
+  | EmbeddingModelExtensions
+  | SpeechModelExtensions
+  | TranscriptionModelExtensions
+  | AgentModelExtensions;
+
+/**
+ * A model from `GET /v1/models`, in OpenAI's shape. `pricing` (where Ragwalla publishes a price)
+ * and `ragwalla` are left out when the request sends `X-Ragwalla-Extensions: none`.
+ */
+export interface Model {
   id: string;
-  name?: string;
-  description?: string;
-  context_length?: number;
-  pricing?: {
-    prompt: string;
-    completion: string;
-  };
-  top_provider?: {
-    max_completion_tokens?: number;
-  };
+  object: 'model';
+  /** 0 for a model: the catalogue knows no release dates. An agent's creation time. */
+  created: number;
+  owned_by: string;
+  pricing?: ModelPricing;
+  ragwalla?: ModelExtensions;
 }
 
 export interface ModelsListResponse {
   object: 'list';
-  data: ModelInfo[];
-  curated: string[];
-  model_ids: string[];
-  providers: string[];
-  total_count: number;
+  data: Model[];
 }
 
 export type ToolType = 'function' | 'assistant' | 'api' | 'knowledge_base' | 'knowledge_graph' | 'mcp' | 'system';

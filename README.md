@@ -1121,9 +1121,26 @@ await ragwalla.channels.retryWebhook(agent.id, channel.id);
 ## Models
 
 ```typescript
-const models = await ragwalla.models.list();
-// models.data: available models
-// models.curated: curated model IDs
+Every model this endpoint serves, and the agents your key can run, in OpenAI's list shape.
+Each model's `ragwalla.kind` says what it is for, so a picker filters the one list:
+
+```typescript
+const { data } = await ragwalla.models.list();
+
+// Chat models, for agents and /v1/chat/completions. `capabilities` lists what the catalogue
+// describes (tools, streaming, structured_output, logprobs), or is null where it describes nothing.
+const chat = data.filter((m) => m.ragwalla?.type === 'model' && m.ragwalla.kind === 'chat');
+const withTools = chat.filter((m) => m.ragwalla?.type === 'model' && m.ragwalla.kind === 'chat' && m.ragwalla.capabilities?.tools === true);
+
+// Embedding models, for vector stores, each with the fixed width it embeds at.
+const embedding = data.filter((m) => m.ragwalla?.type === 'model' && m.ragwalla.kind === 'embedding');
+
+// Speech and transcription models (an agent's voice), and agents as `agent/<id>`.
+const speech = data.filter((m) => m.ragwalla?.type === 'model' && m.ragwalla.kind === 'speech');
+const agents = data.filter((m) => m.ragwalla?.type === 'agent');
+
+// One model, by an id that may be vendor-qualified. `pricing` is USD per token where published.
+const model = await ragwalla.models.retrieve('anthropic/claude-sonnet-4.5');
 ```
 
 ## Feature Flags
