@@ -352,6 +352,38 @@ const kgs = await ragwalla.agents.listKnowledgeGraphs(agent.id);
 await ragwalla.agents.detachKnowledgeGraph(agent.id, kgId);
 ```
 
+### Configuration Versions
+
+Every update that changes an agent's instructions or model settings makes a version, and one version is live. Pin a session to another version to try it before making it live, then promote it, or promote an earlier one to roll back.
+
+```typescript
+// Name the version an update makes
+await ragwalla.agents.update(agentId, { instructions: 'Answer in one paragraph.', label: 'short answers' });
+
+// Make a version without making it live, from the live configuration or another version
+const draft = await ragwalla.agents.versions.create(agentId, { based_on: 3, temperature: 0.2, label: 'cooler' });
+
+// Try it: this session's runs run that version until another run pins it again
+const run = await ragwalla.agents.runs.create(agentId, { input: 'Hello', thread_id: threadId, version: draft.version });
+console.log(run.agent_version, run.agent_version_pinned); // 5 true
+
+// Back to live for the session
+await ragwalla.agents.runs.create(agentId, { input: 'Hello', thread_id: threadId, version: 'live' });
+
+// A socket token can carry a version for every thread its turns run on
+const token = await ragwalla.agents.getToken({ agent_id: agentId, version: draft.version });
+
+// Make it live, or roll back to an earlier one
+await ragwalla.agents.versions.promote(agentId, draft.version);
+const { data, live_version } = await ragwalla.agents.versions.list(agentId);
+const history = await ragwalla.agents.versions.events(agentId);
+
+// A version that is not live can be retired (no longer pinned or promoted) or deleted
+await ragwalla.agents.versions.retire(agentId, 2);
+```
+
+A pin to a version that was retired, deleted or made for another kind of agent is refused with 409 and the version's code.
+
 ## Running an Agent over HTTPS (no WebSockets)
 
 Where WebSockets are blocked (many enterprise networks), run the agent over plain HTTPS. A

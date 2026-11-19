@@ -1,9 +1,11 @@
 import { HTTPClient } from '../client/http-client.js';
 import { path } from '../client/path.js';
 import { AgentRunsResource } from './agent-runs.js';
+import { AgentVersionsResource } from './agent-versions.js';
 import {
   Agent,
   AgentChild,
+  AgentVersionPin,
   CreateAgentRequest,
   UpdateAgentRequest,
   ConnectionToken,
@@ -20,9 +22,12 @@ import {
 export class AgentsResource {
   /** Running an agent over HTTPS, streamed as server-sent events or not. */
   public readonly runs: AgentRunsResource;
+  /** The agent's configuration versions: list, make, promote (roll back or forward), retire. */
+  public readonly versions: AgentVersionsResource;
 
   constructor(private client: HTTPClient) {
     this.runs = new AgentRunsResource(client);
+    this.versions = new AgentVersionsResource(client);
   }
 
   private normalizeSystemSkillProvisioning<T extends CreateAgentRequest | UpdateAgentRequest>(
@@ -111,6 +116,12 @@ export class AgentsResource {
   async getToken(params?: {
     agent_id?: string;
     expires_in?: number;
+    /**
+     * Pins every thread the socket's turns run on to this version of the agent, or `'live'` to
+     * clear such a pin. Fixed in the token: a socket may move only a pin a token of the same
+     * credential set.
+     */
+    version?: AgentVersionPin;
   }): Promise<ConnectionToken> {
     return this.client.post<ConnectionToken>('/v1/agents/auth/websocket', params);
   }
