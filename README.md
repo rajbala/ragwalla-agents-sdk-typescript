@@ -419,6 +419,53 @@ const later = await client.agents.runs.retrieve(agentId, queued.id);
 await client.agents.runs.cancel(agentId, queued.id);
 ```
 
+### Showing an agent's first words sooner
+
+An agent with tools may say a line before it calls one ("Let me look that up"). Until the model
+calls a tool or ends its reply, that line cannot be told from the first words of an answer, so by
+default Ragwalla holds the first reply's text back for 800 ms and drops it where a tool call
+follows. The line is never shown, and a longer answer's first words reach your client 800 ms
+after the model wrote them. A run can ask for its text as it arrives instead:
+
+```typescript
+const stream = await client.agents.runs.stream(agentId, { input: 'Where is order A1?', narration: 'stream' });
+```
+
+With `narration: 'stream'` a line said before a tool call is sent as it is written and stays as
+the first paragraph of the answer (the run's `output_text` too). `'hold'` is the default, and
+`runs.create` takes the option as well. It decides only the first model call of a run: an agent
+with no tools streams from its first token either way, and so does everything after a tool call.
+An agent that answers through a stored assistant holds its narration its own way and refuses
+`'stream'` (400, `unsupported_parameter`).
+
+On a socket, the message carries the choice, and an agent that answers through a stored
+assistant refuses `'stream'` with an `error` frame (code `unsupported_parameter`):
+
+```typescript
+ws.sendMessage({ role: 'user', content: 'Where is order A1?', narration: 'stream' });
+```
+
+This option is about the answer's text. The `narration` event is something else: a line a spoken
+turn says aloud while its tools run.
+
+### Where a run's time went
+
+A run records its moments, in milliseconds since Ragwalla received its request, so the time to
+its first text can be read part by part: the call of the agent, the turn's admission, each model
+call (requested, the provider's headers, its first token, its end), each tool call (an MCP
+call's lookup, connect and `tools/call` included), the first text out and the whole answer.
+
+```typescript
+const run = await client.agents.runs.create(agentId, { input: 'Hello' });
+if (run.timing) {
+  const [first] = run.timing.model_calls;
+  console.log('prompt ready', first.started_ms, 'first token', first.first_token_ms, 'first text out', run.timing.first_output_ms);
+}
+```
+
+`timing` is null for a run that recorded none: a run of an agent that answers through a stored
+assistant, or one whose first model call has not ended.
+
 ### Passing a stream on to a browser
 
 A chat app's server (browser → your server → Ragwalla) can answer its browser with Ragwalla's

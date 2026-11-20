@@ -298,4 +298,33 @@ describe('AgentsResource', () => {
       expect(client.post).toHaveBeenLastCalledWith('/v1/agents/auth/websocket', { agent_id: 'agent_123', version: 2 });
     });
   });
+
+  describe('runs', () => {
+    it('sends a run\'s narration choice in its body, and none where the caller names none', async () => {
+      client.post.mockResolvedValue({});
+      await agents.runs.create('agent_123', { input: 'Hi', narration: 'stream' });
+      expect(client.post).toHaveBeenLastCalledWith(
+        '/v1/agents/agent_123/runs',
+        { input: 'Hi', narration: 'stream', mode: 'wait' },
+        { headers: {} },
+      );
+      // The server holds by default: a run that names no choice sends none.
+      await agents.runs.create('agent_123', { input: 'Hi' });
+      expect(client.post.mock.calls.at(-1)![1]).toEqual({ input: 'Hi', mode: 'wait' });
+    });
+
+    it('sends it with a streamed run and a background one', async () => {
+      const postStream = jest.fn(async (..._args: unknown[]) => ({ response: new Response(''), abort: () => {} }));
+      (client as any).postStream = postStream;
+      await agents.runs.stream('agent_123', { input: 'Hi', narration: 'stream' });
+      expect(postStream.mock.calls[0].slice(0, 2)).toEqual([
+        '/v1/agents/agent_123/runs',
+        { input: 'Hi', narration: 'stream', mode: 'stream' },
+      ]);
+
+      client.post.mockResolvedValue({});
+      await agents.runs.create('agent_123', { input: 'Hi', narration: 'hold', background: true });
+      expect(client.post.mock.calls.at(-1)![1]).toEqual({ input: 'Hi', narration: 'hold', mode: 'background' });
+    });
+  });
 });
