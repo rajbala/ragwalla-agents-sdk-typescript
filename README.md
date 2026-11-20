@@ -958,8 +958,16 @@ await ragwalla.mcpServers.grantAgentAccess(server.id, { agent_id: agent.id, enab
 ### MCP OAuth
 
 ```typescript
-// Start OAuth flow
-const { auth_url } = await ragwalla.mcpServers.startOAuth(server.id, 'https://app.com/callback');
+// Start OAuth flow. With no client id configured, Ragwalla registers one: the
+// metadata document where the authorization server takes it, else dynamic registration.
+const { auth_url } = await ragwalla.mcpServers.startOAuth(server.id, {
+  redirect_uri: 'https://app.com/callback',
+  client_id_metadata_url: 'https://app.com/oauth/mcp-client.json',
+  client_name: 'My App',
+});
+
+// Finish it from your redirect page
+await ragwalla.mcpServers.completeOAuth({ code, state });
 
 // Check status
 const { auth_status } = await ragwalla.mcpServers.oauthStatus(server.id);

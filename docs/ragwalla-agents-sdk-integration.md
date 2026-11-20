@@ -522,7 +522,7 @@ For `oauth2` servers, the `auth_status` field tracks connection state: `pending`
 
 ```ts
 // Start the OAuth flow (returns a URL to open in the browser)
-const { auth_url, state } = await client.mcpServers.startOAuth(server.id, 'https://yourapp.com/oauth/mcp/callback');
+const { auth_url, state } = await client.mcpServers.startOAuth(server.id, { redirect_uri: 'https://yourapp.com/oauth/mcp/callback' });
 
 // Poll until the user completes authorization
 const { auth_status } = await client.mcpServers.oauthStatus(server.id);

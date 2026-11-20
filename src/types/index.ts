@@ -858,6 +858,20 @@ export interface MCPAgentAccess {
   granted_at: number;
 }
 
+export interface MCPOAuthStartRequest {
+  /** Where the authorization server sends the browser back with the code. */
+  redirect_uri?: string;
+  /** An HTTPS URL hosting a Client ID Metadata Document, used as the client id where supported. */
+  client_id_metadata_url?: string;
+  /** The name a dynamically registered client is given. */
+  client_name?: string;
+}
+
+export interface MCPOAuthCallbackRequest {
+  code: string;
+  state: string;
+}
+
 export interface MCPOAuthStartResponse {
   auth_url: string;
   state: string;
