@@ -9,7 +9,9 @@ import {
   MCPTestResponse,
   MCPAgentAccess,
   GrantAgentAccessRequest,
+  MCPOAuthStartRequest,
   MCPOAuthStartResponse,
+  MCPOAuthCallbackRequest,
   MCPOAuthStatusResponse,
   MCPOAuthRefreshResponse,
 } from '../types/index.js';
@@ -69,10 +71,24 @@ export class MCPServersResource {
   }
 
   /**
-   * Start OAuth (authorization code) flow for an MCP server.
+   * Start OAuth (authorization code) flow for an MCP server. A server with no
+   * client id gets one from its authorization server: the Client ID Metadata
+   * Document at `client_id_metadata_url` where the server takes one, else a
+   * dynamic registration named `client_name` for `redirect_uri`. A string is
+   * taken as `redirect_uri`.
    */
-  async startOAuth(serverId: string, redirectUri?: string): Promise<MCPOAuthStartResponse> {
-    return this.client.post<MCPOAuthStartResponse>(path`/v1/mcp-servers/${serverId}/oauth/start`, redirectUri ? { redirect_uri: redirectUri } : {});
+  async startOAuth(serverId: string, request: MCPOAuthStartRequest | string = {}): Promise<MCPOAuthStartResponse> {
+    const body = typeof request === 'string' ? { redirect_uri: request } : request;
+    return this.client.post<MCPOAuthStartResponse>(path`/v1/mcp-servers/${serverId}/oauth/start`, body);
+  }
+
+  /**
+   * Finish an OAuth flow from the `code` and `state` the authorization server
+   * sent to the redirect URI. The server and project come from the state; the
+   * caller must reach that project.
+   */
+  async completeOAuth(request: MCPOAuthCallbackRequest): Promise<{ success: boolean }> {
+    return this.client.post<{ success: boolean }>('/v1/oauth/mcp/callback', request);
   }
 
   /**
