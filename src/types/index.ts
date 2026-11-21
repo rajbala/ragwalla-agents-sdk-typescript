@@ -903,6 +903,11 @@ export interface ChatMessage {
    * agent whose voice replies `when_spoken_to` answers in its voice. Sent on socket messages only.
    */
   spoken?: boolean;
+  /**
+   * What the turn does with a line its model says before it calls a tool (`TurnNarration`).
+   * Sent on socket messages only.
+   */
+  narration?: TurnNarration;
   metadata?: Record<string, any>;
   timestamp?: string;
 }
@@ -2026,6 +2031,24 @@ export interface KgInfrastructureStatus {
 /** A run's status: `waiting` is a run waiting on its client for function results. */
 export type AgentRunStatus = 'queued' | 'in_progress' | 'waiting' | 'completed' | 'failed' | 'cancelled';
 
+/**
+ * What a turn does with a line its model says before it calls a tool ("Let me look that up").
+ * Until the model calls a tool or ends its reply, a turn cannot tell such a line from an answer's
+ * first words.
+ *
+ * - `hold` (the default): the first reply's text is kept back for 800 ms from its first word,
+ *   and dropped where a tool call follows in that time. An answer shorter than that goes out as
+ *   the model ends it.
+ * - `stream`: the text is sent as it arrives, and a line said before a tool call stays as the
+ *   first paragraph of the answer (a run's `output_text` too).
+ *
+ * It decides only the first model call of a turn of an agent that has tools and calls its model
+ * directly: an agent with no tools streams from its first token either way, and so does every
+ * later call of a turn. An agent that answers through a stored assistant holds its narration its
+ * own way, and refuses `stream` (400, `unsupported_parameter`).
+ */
+export type TurnNarration = 'hold' | 'stream';
+
 export interface CreateAgentRunParams {
   /** The user's message. */
   input: string;
@@ -2043,6 +2066,87 @@ export interface CreateAgentRunParams {
    * deleted or made for another kind of agent is refused (409).
    */
   version?: AgentVersionPin;
+  /**
+   * What the run does with a line its model says before it calls a tool: `'hold'` (the default)
+   * keeps the first reply's text back for 800 ms so such a line is never shown, `'stream'` sends
+   * the text as it arrives (`TurnNarration`).
+   */
+  narration?: TurnNarration;
+}
+
+/** One model call of a run, in milliseconds since the run's request was received. */
+/** The outbound connections an agent's object held open at one moment. */
+export interface AgentRunOpenConnections {
+  count: number;
+  by_host: Record<string, number>;
+  /** How long the connection open longest had been open, in milliseconds; null with none open. */
+  oldest_ms: number | null;
+}
+
+export interface AgentRunModelCallTiming {
+  /** The turn went to call the model: for its first call, the prompt was ready. */
+  started_ms: number;
+  /** The request left for the provider. */
+  requested_ms: number | null;
+  /**
+   * The outbound connections the agent's object held open as the request left, by host. Past
+   * Cloudflare's six, a request waits for one to close, which reads as a late `responded_ms`.
+   * Null for a call whose request never left; absent on an endpoint from before it was recorded.
+   */
+  open_at_request?: AgentRunOpenConnections | null;
+  /** The provider answered (its response headers). */
+  responded_ms: number | null;
+  /** The model's first token arrived: text, or the start of a tool call. */
+  first_token_ms: number | null;
+  /** The model's answer was whole. */
+  ended_ms: number | null;
+}
+
+/** One tool call of a run, from the moment it was taken up to its result. */
+export interface AgentRunToolCallTiming {
+  /** The model's id for the call, as the run's output items name it. */
+  id: string;
+  name: string;
+  /** The granted tool's type (`function`, `mcp`, ...); null for a name that matches no grant. */
+  type: string | null;
+  started_ms: number;
+  ended_ms: number | null;
+  /** What an MCP tool's call spent where, each a duration in milliseconds; null for any other tool. */
+  mcp: {
+    /** Finding the tool and its server. */
+    lookup_ms: number;
+    /** Connecting to the server; null on a connection already open. */
+    connect_ms: number | null;
+    /** The server's `tools/call`; null when the call never reached it. */
+    call_ms: number | null;
+  } | null;
+}
+
+/**
+ * Where a run's time went: its moments in milliseconds since Ragwalla received its request
+ * (`received_at`), so the time to a run's first text can be read part by part.
+ */
+export interface AgentRunTiming {
+  /** When the run's request was received, in epoch milliseconds: what every `_ms` counts from. */
+  received_at: number;
+  /** The agent was called: the key was checked, the agent read and the session opened. */
+  dispatched_ms: number;
+  /** The agent started, where the request found it asleep; null where it was running. */
+  agent_started_ms: number | null;
+  /** The agent received the turn. */
+  agent_received_ms: number;
+  /** The turn was admitted: its message was stored and its run created. */
+  admitted_ms: number;
+  /** The first text of the answer was sent. */
+  first_output_ms: number | null;
+  /** The answer was whole. */
+  answered_ms: number | null;
+  /** Every model call the run made; `model_calls` lists the first 64. */
+  model_call_count: number;
+  model_calls: AgentRunModelCallTiming[];
+  /** Every tool call the run ran; `tool_calls` lists the first 64. */
+  tool_call_count: number;
+  tool_calls: AgentRunToolCallTiming[];
 }
 
 /** An item a run wrote: a message, a tool call, a tool call's output, a subagent's report. */
@@ -2079,6 +2183,11 @@ export interface AgentRun {
   agent_version_pinned: boolean;
   /** The version a pin named that no longer fit, so the run ran live instead; else null. */
   agent_version_pin_dropped: number | null;
+  /**
+   * Where the run's time went. Null for a run that recorded none: a run of an agent that answers
+   * through a stored assistant, or one whose first model call has not ended.
+   */
+  timing: AgentRunTiming | null;
 }
 
 /**

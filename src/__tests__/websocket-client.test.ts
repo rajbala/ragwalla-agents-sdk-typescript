@@ -359,6 +359,21 @@ describe('RagwallaWebSocket reconnect/resume protocol (§6a)', () => {
     expect(byId).toMatchObject({ audio: { fileId: 'file-1' }, metadata: { source: 'mic' } });
   });
 
+  it('sends a message\'s narration choice on its frame, and none where the caller names none', async () => {
+    const client = newClient();
+    await connectOpen(client);
+    const socket = FakeWebSocket.last;
+    const sentFrames = () => socket.sent.map((data: string) => JSON.parse(data)).filter((frame: any) => frame.type === 'message');
+
+    client.sendMessage({ role: 'user', content: 'Where is order A1?', narration: 'stream' });
+    client.sendMessage({ role: 'user', content: 'And A2?' });
+
+    const [streamed, held] = sentFrames();
+    expect(streamed).toMatchObject({ content: 'Where is order A1?', narration: 'stream' });
+    // The server holds by default.
+    expect(held).not.toHaveProperty('narration');
+  });
+
   it('passes a thread_event frame missing its fields to rawMessage, not threadEvent', async () => {
     const client = newClient();
     await connectOpen(client);

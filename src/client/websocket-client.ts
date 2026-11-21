@@ -608,6 +608,7 @@ export class RagwallaWebSocket {
       role: message.role,
       timestamp: new Date().toISOString(),
       ...(message.spoken !== undefined && { spoken: message.spoken }),
+      ...(message.narration !== undefined && { narration: message.narration }),
       ...(message.metadata && { metadata: message.metadata }),
       ...(this.truncationStrategy && { truncationStrategy: this.truncationStrategy }),
       ...(this.maxKbCharsPerChunk !== undefined && { maxKbCharsPerChunk: this.maxKbCharsPerChunk }),
