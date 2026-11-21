@@ -2096,6 +2096,14 @@ export interface AgentRunModelCallTiming {
   open_at_request?: AgentRunOpenConnections | null;
   /** The provider answered (its response headers). */
   responded_ms: number | null;
+  /**
+   * What the provider said it spent on the request before answering (OpenAI's
+   * `openai-processing-ms`). Null where the provider sends none; absent on an endpoint from before
+   * it was recorded.
+   */
+  provider_processing_ms?: number | null;
+  /** The provider's id for the request, for its support to look up; null where it sends none. */
+  provider_request_id?: string | null;
   /** The model's first token arrived: text, or the start of a tool call. */
   first_token_ms: number | null;
   /** The model's answer was whole. */
