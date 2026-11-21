@@ -2075,11 +2075,25 @@ export interface CreateAgentRunParams {
 }
 
 /** One model call of a run, in milliseconds since the run's request was received. */
+/** The outbound connections an agent's object held open at one moment. */
+export interface AgentRunOpenConnections {
+  count: number;
+  by_host: Record<string, number>;
+  /** How long the connection open longest had been open, in milliseconds; null with none open. */
+  oldest_ms: number | null;
+}
+
 export interface AgentRunModelCallTiming {
   /** The turn went to call the model: for its first call, the prompt was ready. */
   started_ms: number;
   /** The request left for the provider. */
   requested_ms: number | null;
+  /**
+   * The outbound connections the agent's object held open as the request left, by host. Past
+   * Cloudflare's six, a request waits for one to close, which reads as a late `responded_ms`.
+   * Null for a call whose request never left; absent on an endpoint from before it was recorded.
+   */
+  open_at_request?: AgentRunOpenConnections | null;
   /** The provider answered (its response headers). */
   responded_ms: number | null;
   /** The model's first token arrived: text, or the start of a tool call. */
