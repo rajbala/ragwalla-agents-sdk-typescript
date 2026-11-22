@@ -14,7 +14,7 @@ export class ModelsResource {
     return this.client.get<ModelsListResponse>('/v1/models');
   }
 
-  /** One model by its id, which may be vendor-qualified (`anthropic/claude-sonnet-4.5`, `@cf/zai-org/glm-5.2`). */
+  /** One model by its id, which may be vendor-qualified (`anthropic/claude-sonnet-5.5`, `@cf/zai-org/glm-5.2`). */
   async retrieve(modelId: string): Promise<Model> {
     // Each part of the id is its own path segment, encoded and checked as any id is.
     const segments = modelId.split('/').map((part) => path`${part}`);
