@@ -1195,7 +1195,7 @@ const speech = data.filter((m) => m.ragwalla?.type === 'model' && m.ragwalla.kin
 const agents = data.filter((m) => m.ragwalla?.type === 'agent');
 
 // One model, by an id that may be vendor-qualified. `pricing` is USD per token where published.
-const model = await ragwalla.models.retrieve('anthropic/claude-sonnet-4.5');
+const model = await ragwalla.models.retrieve('anthropic/claude-sonnet-5.5');
 ```
 
 ## Feature Flags
